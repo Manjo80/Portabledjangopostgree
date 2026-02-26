@@ -121,37 +121,45 @@ Write-Host " OK" -ForegroundColor Green
 Write-OK "Python fertig."
 
 # ── PostgreSQL ────────────────────────────────────────────────────────────────
-Write-Step "PostgreSQL $PgVersion herunterladen"
+$PgInitdb = Join-Path $PostgresDir "bin\initdb.exe"
 
-$PostgresZip    = Join-Path $Root "postgresql-binaries.zip"
-$PostgresZipTmp = Join-Path $TempDir "postgresql-binaries.zip"
-
-if ($SkipPostgresDownload) {
-    if (-not (Test-Path $PostgresZip)) {
-        Write-Fail "postgresql-binaries.zip nicht gefunden neben diesem Skript."
-    }
-    Copy-Item $PostgresZip $PostgresZipTmp
-    Write-OK "Vorhandene PostgreSQL-ZIP wird verwendet."
+# Wenn postgres\bin\initdb.exe schon vorhanden ist, komplett ueberspringen
+if (Test-Path $PgInitdb) {
+    Write-Step "PostgreSQL $PgVersion"
+    Write-OK "postgres\bin\initdb.exe bereits vorhanden - uebersprungen."
 } else {
-    Write-Host "     (ca. 300 MB - bitte warten)"
-    Invoke-Download `
-        -Url  $PostgresDownloadUrl `
-        -Dest $PostgresZipTmp `
-        -Label "PostgreSQL $PgVersion Windows x64"
-}
+    Write-Step "PostgreSQL $PgVersion herunterladen"
 
-Write-Step "PostgreSQL einrichten"
-$PgTemp = Join-Path $TempDir "pg-extract"
-New-Item -ItemType Directory $PgTemp -Force | Out-Null
-Expand-Archive -Path $PostgresZipTmp -DestinationPath $PgTemp -Force
-$PgRoot = Join-Path $PgTemp "pgsql"
-foreach ($dir in @("bin", "lib", "share")) {
-    $src = Join-Path $PgRoot $dir
-    if (Test-Path $src) {
-        Copy-Item $src -Destination $PostgresDir -Recurse -Force
+    $PostgresZip    = Join-Path $Root "postgresql-binaries.zip"
+    $PostgresZipTmp = Join-Path $TempDir "postgresql-binaries.zip"
+
+    if ($SkipPostgresDownload) {
+        if (-not (Test-Path $PostgresZip)) {
+            Write-Fail "postgresql-binaries.zip nicht gefunden neben diesem Skript.`nBitte die ZIP unter $PostgresZip ablegen oder das Flag -SkipPostgresDownload weglassen."
+        }
+        Copy-Item $PostgresZip $PostgresZipTmp
+        Write-OK "Vorhandene PostgreSQL-ZIP wird verwendet."
+    } else {
+        Write-Host "     (ca. 300 MB - bitte warten)"
+        Invoke-Download `
+            -Url  $PostgresDownloadUrl `
+            -Dest $PostgresZipTmp `
+            -Label "PostgreSQL $PgVersion Windows x64"
     }
+
+    Write-Step "PostgreSQL einrichten"
+    $PgTemp = Join-Path $TempDir "pg-extract"
+    New-Item -ItemType Directory $PgTemp -Force | Out-Null
+    Expand-Archive -Path $PostgresZipTmp -DestinationPath $PgTemp -Force
+    $PgRoot = Join-Path $PgTemp "pgsql"
+    foreach ($dir in @("bin", "lib", "share")) {
+        $src = Join-Path $PgRoot $dir
+        if (Test-Path $src) {
+            Copy-Item $src -Destination $PostgresDir -Recurse -Force
+        }
+    }
+    Write-OK "PostgreSQL-Binaries kopiert."
 }
-Write-OK "PostgreSQL-Binaries kopiert."
 
 # ── Aufraumen ─────────────────────────────────────────────────────────────────
 Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue

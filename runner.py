@@ -583,6 +583,12 @@ class AppRunner:
                 f"{self.app['db_password']}@127.0.0.1:"
                 f"{self.app['db_port']}/{self.app['db_name']}"
             ),
+            # DB_ENGINE: für Django-Projekte die os.environ.get('DB_ENGINE') lesen
+            "DB_ENGINE": "django.db.backends.postgresql",
+            # Windows-Konsole (CP1252) kann viele Unicode-Zeichen nicht ausgeben.
+            # PYTHONUTF8=1 erzwingt UTF-8 für alle Python-I/O-Streams.
+            "PYTHONUTF8": "1",
+            "PYTHONIOENCODING": "utf-8",
         })
         # SECRET_KEY nur setzen wenn explizit konfiguriert
         sk = self.app.get("secret_key", "")
@@ -616,7 +622,8 @@ class AppRunner:
         # Feste managed-Keys in sinnvoller Reihenfolge
         managed_keys = [
             "DEBUG", "SECRET_KEY", "ALLOWED_HOSTS", "DJANGO_SETTINGS_MODULE",
-            "DB_NAME", "DB_USER", "DB_PASS", "DB_HOST", "DB_PORT", "DATABASE_URL",
+            "DB_ENGINE", "DB_NAME", "DB_USER", "DB_PASS", "DB_HOST", "DB_PORT",
+            "DATABASE_URL",
         ]
         # Benutzerdefinierte Extra-Keys aus der Konfiguration
         try:

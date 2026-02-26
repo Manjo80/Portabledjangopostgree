@@ -162,6 +162,10 @@ class AppRunner:
         if not self._start_postgres(wait=True):
             return False
 
+        if not self._install_requirements():
+            self._stop_postgres()
+            return False
+
         self.log(f"  [{self.app['name']}] Erstelle Datenbankbenutzer …")
         self._psql_exec(
             f"CREATE USER {self.app['db_user']} WITH PASSWORD "
@@ -240,13 +244,37 @@ class AppRunner:
             capture_output=True,
         )
 
+    def _install_requirements(self) -> bool:
+        """Installiert Python-Pakete aus requirements.txt (falls vorhanden)."""
+        req_file = Path(self.app["source_path"]) / "requirements.txt"
+        if not req_file.exists():
+            self.log(f"  [{self.app['name']}] Keine requirements.txt – überspringe pip install.")
+            return True
+        self.log(f"  [{self.app['name']}] Installiere Pakete (pip install -r requirements.txt) …")
+        r = subprocess.run(
+            [str(self._py), "-m", "pip", "install", "-r", str(req_file),
+             "--quiet", "--disable-pip-version-check"],
+            cwd=self.app["source_path"],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            # Letzten Teil von stderr anzeigen (nicht die ganze Ausgabe)
+            err = r.stderr.strip()[-600:] if r.stderr.strip() else r.stdout.strip()[-600:]
+            self.log(f"  pip-Fehler: {err}")
+            return False
+        self.log(f"  [{self.app['name']}] Pakete installiert.")
+        return True
+
     # ─── Migrationen (öffentlich, für Update-Workflow) ────────────────────
 
     def _run_migrations(self) -> bool:
         """
-        Führt Django-Migrationen aus ohne den Server zu starten.
+        Installiert Pakete + führt Django-Migrationen aus ohne den Server zu starten.
         PostgreSQL muss bereits laufen (wird kurz gestartet und gestoppt).
         """
+        # Neue Abhängigkeiten nach git pull installieren
+        self._install_requirements()
+
         pg_was_running = self._is_postgres_running()
         if not pg_was_running and not self._start_postgres(wait=True):
             return False

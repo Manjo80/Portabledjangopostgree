@@ -17,6 +17,7 @@ import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -30,6 +31,84 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 REPOS_DIR = BASE_DIR / "repos"
+
+# ─── Pink-Elefant-Logo ────────────────────────────────────────────────────────
+PINK = "#e91e8c"   # Marken-Pink
+PINK_DARK = "#c0156f"
+
+
+def _draw_elephant(canvas: tk.Canvas, ox: int, oy: int, scale: float = 1.0,
+                   color: str = PINK) -> None:
+    """
+    Zeichnet eine stilisierte Elefanten-Silhouette auf *canvas*.
+    ox/oy = Ursprung (oben-links des Bounding-Box).
+    scale = 1.0 entspricht einer Bounding-Box von 88 × 72 px.
+    """
+    def s(v):
+        return v * scale
+
+    # Ohr (hinter Kopf, etwas dunkler)
+    canvas.create_oval(
+        ox + s(2),  oy + s(6),
+        ox + s(34), oy + s(44),
+        fill=PINK_DARK, outline="")
+
+    # Körper
+    canvas.create_oval(
+        ox + s(28), oy + s(16),
+        ox + s(88), oy + s(58),
+        fill=color, outline="")
+
+    # Kopf
+    canvas.create_oval(
+        ox + s(4),  oy + s(8),
+        ox + s(46), oy + s(46),
+        fill=color, outline="")
+
+    # Rüssel (hängt nach unten)
+    canvas.create_polygon(
+        ox + s(7),  oy + s(40),
+        ox + s(20), oy + s(40),
+        ox + s(24), oy + s(58),
+        ox + s(20), oy + s(66),
+        ox + s(12), oy + s(64),
+        ox + s(8),  oy + s(54),
+        fill=color, outline="")
+
+    # Rüssel-Spitze abrunden
+    canvas.create_oval(
+        ox + s(10), oy + s(58),
+        ox + s(24), oy + s(68),
+        fill=color, outline="")
+
+    # Beine (4 abgerundete Rechtecke)
+    for lx in [s(32), s(44), s(56), s(68)]:
+        canvas.create_rectangle(
+            ox + lx,        oy + s(52),
+            ox + lx + s(10), oy + s(72),
+            fill=color, outline="")
+        canvas.create_oval(
+            ox + lx,        oy + s(64),
+            ox + lx + s(10), oy + s(72),
+            fill=color, outline="")
+
+    # Schwanz
+    canvas.create_polygon(
+        ox + s(84), oy + s(24),
+        ox + s(92), oy + s(16),
+        ox + s(94), oy + s(26),
+        ox + s(88), oy + s(32),
+        fill=color, outline="")
+
+    # Auge (weiß + Pupille)
+    canvas.create_oval(
+        ox + s(18), oy + s(16),
+        ox + s(28), oy + s(26),
+        fill="white", outline="")
+    canvas.create_oval(
+        ox + s(21), oy + s(19),
+        ox + s(26), oy + s(24),
+        fill="#1a1a1a", outline="")
 
 
 # ─── Hilfsfunktionen ─────────────────────────────────────────────────────────
@@ -69,6 +148,88 @@ def _random_password(length: int = 20) -> str:
 
 def _slug(text: str) -> str:
     return text.lower().strip().replace(" ", "_").replace("-", "_")
+
+
+# ─── About-Dialog ────────────────────────────────────────────────────────────
+
+class AboutDialog(ctk.CTkToplevel):
+    """Über-Dialog mit Pink-Elefant-Logo und App-Informationen."""
+
+    _BG = "#111111"
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Über Portable Django Manager")
+        self.geometry("420x440")
+        self.resizable(False, False)
+        self.grab_set()
+        self.configure(fg_color=("gray95", "#1a1a1a"))
+
+        # ── Logo-Panel ────────────────────────────────────────────────────
+        logo_panel = ctk.CTkFrame(self, fg_color=self._BG, corner_radius=16)
+        logo_panel.pack(fill="x", padx=24, pady=(24, 0))
+
+        # Canvas für Elefant
+        cv = tk.Canvas(logo_panel, width=96, height=78,
+                       bg=self._BG, highlightthickness=0)
+        cv.pack(pady=(20, 4))
+        _draw_elephant(cv, ox=1, oy=3, scale=1.0)
+
+        ctk.CTkLabel(
+            logo_panel,
+            text="PINK ELEFANT",
+            font=ctk.CTkFont(family="Arial", size=22, weight="bold"),
+            text_color=PINK,
+        ).pack()
+
+        ctk.CTkLabel(
+            logo_panel,
+            text="Software & Webentwicklung",
+            font=ctk.CTkFont(size=11),
+            text_color="gray55",
+        ).pack(pady=(2, 18))
+
+        # ── App-Info ──────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            self,
+            text="Portable Django Manager",
+            font=ctk.CTkFont(size=17, weight="bold"),
+        ).pack(pady=(18, 2))
+
+        ctk.CTkLabel(
+            self,
+            text="Version 1.1",
+            text_color="gray55",
+            font=ctk.CTkFont(size=12),
+        ).pack()
+
+        ctk.CTkLabel(
+            self,
+            text=(
+                "Verwaltet mehrere Django-Webanwendungen mit\n"
+                "portablem Python und PostgreSQL auf Windows.\n"
+                "Kein Admin-Zugriff erforderlich."
+            ),
+            font=ctk.CTkFont(size=11),
+            text_color="gray55",
+            justify="center",
+        ).pack(pady=(10, 6))
+
+        ctk.CTkFrame(self, height=1, fg_color="gray30").pack(
+            fill="x", padx=32, pady=6
+        )
+
+        ctk.CTkLabel(
+            self,
+            text="© 2025 Pink Elefant",
+            text_color="gray50",
+            font=ctk.CTkFont(size=11),
+        ).pack(pady=(4, 0))
+
+        ctk.CTkButton(
+            self, text="Schließen", width=130,
+            command=self.destroy,
+        ).pack(pady=18)
 
 
 # ─── Superuser-Dialog ────────────────────────────────────────────────────────
@@ -599,6 +760,7 @@ class PortableDjangoManager(ctk.CTk):
         sidebar = ctk.CTkFrame(self, width=215, corner_radius=0)
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
+        sidebar.grid_columnconfigure(0, weight=1)
         sidebar.grid_rowconfigure(10, weight=1)
 
         ctk.CTkLabel(
@@ -642,8 +804,42 @@ class PortableDjangoManager(ctk.CTk):
             justify="left",
         ).pack(padx=10, pady=10, anchor="w")
 
-        ctk.CTkLabel(sidebar, text="v1.1", text_color="gray50",
-                     font=ctk.CTkFont(size=11)).grid(row=11, column=0, pady=12)
+        # About-Button
+        ctk.CTkButton(
+            sidebar, text="ℹ  Über / About",
+            height=30,
+            fg_color="transparent",
+            border_width=1,
+            border_color=("gray70", "gray35"),
+            text_color=("gray30", "gray70"),
+            hover_color=("gray85", "gray25"),
+            font=ctk.CTkFont(size=12),
+            command=self._show_about,
+        ).grid(row=9, column=0, padx=14, pady=(0, 6), sticky="ew")
+
+        # Pink-Elefant-Signatur am Seitenleisten-Fuß
+        sig = ctk.CTkFrame(sidebar, fg_color=("gray85", "#111111"), corner_radius=10)
+        sig.grid(row=11, column=0, padx=14, pady=(0, 14), sticky="ew")
+        sig.grid_columnconfigure(0, weight=1)
+
+        sig_cv = tk.Canvas(sig, width=56, height=46,
+                           bg="#111111", highlightthickness=0)
+        sig_cv.grid(row=0, column=0, pady=(10, 2))
+        _draw_elephant(sig_cv, ox=1, oy=1, scale=0.58)
+
+        ctk.CTkLabel(
+            sig, text="PINK ELEFANT",
+            font=ctk.CTkFont(family="Arial", size=11, weight="bold"),
+            text_color=PINK,
+            fg_color="#111111",
+        ).grid(row=1, column=0, pady=(0, 2))
+
+        ctk.CTkLabel(
+            sig, text="v1.1",
+            font=ctk.CTkFont(size=9),
+            text_color="gray50",
+            fg_color="#111111",
+        ).grid(row=2, column=0, pady=(0, 8))
 
         # ── Inhaltsbereich ────────────────────────────────────────────────
         content = ctk.CTkFrame(self, fg_color="transparent")
@@ -888,6 +1084,9 @@ class PortableDjangoManager(ctk.CTk):
 
     def _open_browser(self, app: dict):
         webbrowser.open(f"http://localhost:{app['port']}")
+
+    def _show_about(self):
+        AboutDialog(self)
 
     def _create_superuser(self, app: dict):
         dlg = SuperuserDialog(self)

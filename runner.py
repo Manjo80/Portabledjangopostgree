@@ -8,6 +8,9 @@ import json
 import os
 import socket
 import subprocess
+
+# Kein sichtbares Konsolenfenster auf Windows
+_NO_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 import sys
 import threading
 import time
@@ -183,6 +186,16 @@ class AppRunner:
 
     # ─── PostgreSQL ────────────────────────────────────────────────────────
 
+    def _pg_env(self) -> dict:
+        """PATH mit postgres\bin + postgres\lib – nötig damit DLLs gefunden werden."""
+        env = os.environ.copy()
+        pg_lib = self.postgres_dir / "lib"
+        paths = [str(self._pg_bin)]
+        if pg_lib.exists():
+            paths.append(str(pg_lib))
+        env["PATH"] = os.pathsep.join(paths) + os.pathsep + env.get("PATH", "")
+        return env
+
     def _setup_needed(self) -> bool:
         return not (self.data_dir / "PG_VERSION").exists()
 
@@ -196,6 +209,7 @@ class AppRunner:
             [str(self._initdb), "-D", str(self.data_dir),
              "-U", "postgres", "-E", "UTF8", "--no-locale", "--auth=trust"],
             capture_output=True, text=True,
+            env=self._pg_env(), creationflags=_NO_WIN,
         )
         if r.returncode != 0:
             self.log(f"  initdb-Fehler: {r.stderr}")
@@ -268,9 +282,14 @@ class AppRunner:
              "-l", str(log_file),
              "-w", "-t", "30"],
             capture_output=True, text=True,
+            env=self._pg_env(), creationflags=_NO_WIN,
         )
         if r.returncode != 0:
-            self.log(f"  PostgreSQL-Fehler: {r.stderr}")
+            self.log(f"  PostgreSQL-Fehler: {r.stderr.strip() or '(kein Output)'}")
+            # PostgreSQL-Logdatei ausgeben für bessere Fehlerdiagnose
+            if log_file.exists():
+                tail = log_file.read_text(encoding="utf-8", errors="replace")[-1200:]
+                self.log(f"  postgres.log: {tail.strip()}")
             return False
         if wait:
             time.sleep(1)
@@ -281,6 +300,7 @@ class AppRunner:
             [str(self._pg_ctl), "stop",
              "-D", str(self.data_dir), "-m", "fast"],
             capture_output=True,
+            env=self._pg_env(), creationflags=_NO_WIN,
         )
 
     def _psql_exec(self, sql: str):
@@ -291,6 +311,7 @@ class AppRunner:
              "-U", "postgres",
              "-c", sql],
             capture_output=True,
+            env=self._pg_env(), creationflags=_NO_WIN,
         )
 
     def _install_requirements(self) -> bool:
@@ -401,6 +422,7 @@ class AppRunner:
         r = subprocess.run(
             [str(self._pg_ctl), "status", "-D", str(self.data_dir)],
             capture_output=True,
+            env=self._pg_env(), creationflags=_NO_WIN,
         )
         return r.returncode == 0
 

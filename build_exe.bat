@@ -19,7 +19,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo  [1/3] Installiere Abhaengigkeiten...
-pip install -r requirements.txt -q
+python -m pip install -r requirements.txt -q
 if %ERRORLEVEL% neq 0 (
     echo  FEHLER: pip install fehlgeschlagen!
     pause
@@ -28,7 +28,7 @@ if %ERRORLEVEL% neq 0 (
 echo  [OK] Abhaengigkeiten installiert.
 
 echo  [2/3] Erstelle EXE mit PyInstaller...
-pyinstaller ^
+python -m PyInstaller ^
     --onefile ^
     --windowed ^
     --name "PortableDjangoManager" ^

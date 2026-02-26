@@ -243,9 +243,19 @@ class AppRunner:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         self.log(f"  [{self.app['name']}] Initialisiere Datenbank …")
+        pg_share = self.postgres_dir / "share"
+        initdb_cmd = [
+            str(self._initdb),
+            "-D", str(self.data_dir),
+            "-U", "postgres",
+            "-E", "UTF8",
+            "--no-locale",
+            "--auth=trust",
+        ]
+        if pg_share.is_dir():
+            initdb_cmd += ["-L", str(pg_share)]
         r = subprocess.run(
-            [str(self._initdb), "-D", str(self.data_dir),
-             "-U", "postgres", "-E", "UTF8", "--no-locale", "--auth=trust"],
+            initdb_cmd,
             capture_output=True, text=True,
             env=self._pg_env(), creationflags=_NO_WIN,
         )

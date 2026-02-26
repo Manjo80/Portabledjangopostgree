@@ -173,6 +173,11 @@ class AppRunner:
                     on_complete(False)
                 return
 
+            # Abbruch falls stop() während pip aufgerufen wurde
+            with self._lock:
+                if not self._running:
+                    return
+
             if self._setup_needed():
                 self.log(f"[{self.app['name']}] Ersteinrichtung läuft …")
                 if not self._setup():
@@ -182,12 +187,24 @@ class AppRunner:
                         on_complete(False)
                     return
 
+            # Abbruch falls stop() während Setup aufgerufen wurde
+            with self._lock:
+                if not self._running:
+                    self._stop_postgres()
+                    return
+
             if not self._start_postgres():
                 with self._lock:
                     self._running = False
                 if on_complete:
                     on_complete(False)
                 return
+
+            # Abbruch falls stop() während PostgreSQL-Start aufgerufen wurde
+            with self._lock:
+                if not self._running:
+                    self._stop_postgres()
+                    return
 
             if not self._start_django():
                 self._stop_postgres()
@@ -355,12 +372,19 @@ class AppRunner:
         return True
 
     def _stop_postgres(self):
-        subprocess.run(
-            [str(self._pg_ctl), "stop",
-             "-D", str(self.data_dir), "-m", "fast"],
-            capture_output=True,
-            env=self._pg_env(), creationflags=_NO_WIN,
-        )
+        if not self._is_postgres_running():
+            return
+        self.log(f"  [{self.app['name']}] Stoppe PostgreSQL …")
+        try:
+            subprocess.run(
+                [str(self._pg_ctl), "stop",
+                 "-D", str(self.data_dir), "-m", "fast", "-w", "-t", "15"],
+                capture_output=True, text=True,
+                env=self._pg_env(), creationflags=_NO_WIN,
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.log(f"  [{self.app['name']}] Warnung: pg_ctl stop Timeout.")
 
     def _psql_exec(self, sql: str):
         subprocess.run(

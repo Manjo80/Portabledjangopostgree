@@ -607,9 +607,10 @@ class AppDialog(ctk.CTkToplevel):
         # ── Lokaler Ordner ────────────────────────────────────────────────
         self._local_frame = ctk.CTkFrame(self, fg_color="transparent")
         self._local_frame.grid_columnconfigure(0, weight=1)
+        self.v_source = ctk.StringVar()
         ctk.CTkEntry(
             self._local_frame,
-            textvariable=(self.v_source := ctk.StringVar()),
+            textvariable=self.v_source,
         ).grid(row=0, column=0, sticky="ew")
         ctk.CTkButton(
             self._local_frame, text="…", width=36, command=self._browse_local

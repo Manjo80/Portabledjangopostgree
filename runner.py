@@ -13,7 +13,13 @@ import threading
 import time
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+# Wenn als PyInstaller-.exe gefroren: BASE_DIR = Ordner der .exe (portabler Ordner)
+# Im Entwicklungs-Modus:             BASE_DIR = Ordner dieser Datei
+BASE_DIR = (
+    Path(sys.executable).parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).parent
+)
 
 
 class AppRunner:
@@ -83,10 +89,38 @@ class AppRunner:
 
     # ─── Interner Ablauf ───────────────────────────────────────────────────
 
+    def check_portable_dirs(self) -> str:
+        """Gibt '' zurück wenn alles OK, sonst eine Fehlermeldung."""
+        missing = []
+        if sys.platform == "win32":
+            if not self._py.exists():
+                missing.append(f"python\\python.exe  (erwartet: {self._py})")
+            if not self._initdb.exists():
+                missing.append(f"postgres\\bin\\initdb.exe  (erwartet: {self._initdb})")
+        if missing:
+            return (
+                "Fehlende portable Komponenten im Programmordner:\n  • "
+                + "\n  • ".join(missing)
+                + f"\n\nProgrammordner: {self.base_dir}\n\n"
+                "Bitte sicherstellen, dass die Ordner 'python' und 'postgres'\n"
+                "im selben Verzeichnis wie die .exe liegen."
+            )
+        return ""
+
     def _start_internal(self, on_complete=None):
         try:
             with self._lock:
                 self._running = True
+
+            # Portable-Verzeichnisse prüfen
+            err = self.check_portable_dirs()
+            if err:
+                self.log(f"[{self.app['name']}] FEHLER: {err}")
+                with self._lock:
+                    self._running = False
+                if on_complete:
+                    on_complete(False)
+                return
 
             # Port-Konflikt prüfen bevor irgendetwas gestartet wird
             if not self._is_port_free(self.app["port"]):

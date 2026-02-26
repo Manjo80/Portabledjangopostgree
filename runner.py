@@ -139,6 +139,14 @@ class AppRunner:
                     on_complete(False)
                 return
 
+            # Pakete immer prüfen/installieren (auch wenn DB schon eingerichtet ist)
+            if not self._ensure_requirements():
+                with self._lock:
+                    self._running = False
+                if on_complete:
+                    on_complete(False)
+                return
+
             if self._setup_needed():
                 self.log(f"[{self.app['name']}] Ersteinrichtung läuft …")
                 if not self._setup():
@@ -223,10 +231,6 @@ class AppRunner:
             )
 
         if not self._start_postgres(wait=True):
-            return False
-
-        if not self._install_requirements():
-            self._stop_postgres()
             return False
 
         self.log(f"  [{self.app['name']}] Erstelle Datenbankbenutzer …")
@@ -314,24 +318,38 @@ class AppRunner:
             env=self._pg_env(), creationflags=_NO_WIN,
         )
 
-    def _install_requirements(self) -> bool:
-        """Installiert Python-Pakete aus requirements.txt (falls vorhanden)."""
+    def _ensure_requirements(self) -> bool:
+        """
+        Installiert Pakete aus requirements.txt wenn nötig.
+        Verwendet eine Marker-Datei: Installation wird übersprungen wenn der
+        Marker neuer als requirements.txt ist (bereits aktuell).
+        Nach git pull mit neuer requirements.txt wird automatisch neu installiert.
+        """
         req_file = Path(self.app["source_path"]) / "requirements.txt"
         if not req_file.exists():
-            self.log(f"  [{self.app['name']}] Keine requirements.txt – überspringe pip install.")
             return True
+
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        marker = self.data_dir / ".pip_done"
+        try:
+            if marker.exists() and marker.stat().st_mtime >= req_file.stat().st_mtime:
+                return True  # Bereits installiert und aktuell
+        except OSError:
+            pass
+
         self.log(f"  [{self.app['name']}] Installiere Pakete (pip install -r requirements.txt) …")
         r = subprocess.run(
             [str(self._py), "-m", "pip", "install", "-r", str(req_file),
              "--quiet", "--disable-pip-version-check"],
             cwd=self.app["source_path"],
             capture_output=True, text=True,
+            creationflags=_NO_WIN,
         )
         if r.returncode != 0:
-            # Letzten Teil von stderr anzeigen (nicht die ganze Ausgabe)
             err = r.stderr.strip()[-600:] if r.stderr.strip() else r.stdout.strip()[-600:]
             self.log(f"  pip-Fehler: {err}")
             return False
+        marker.touch()
         self.log(f"  [{self.app['name']}] Pakete installiert.")
         return True
 
@@ -342,8 +360,8 @@ class AppRunner:
         Installiert Pakete + führt Django-Migrationen aus ohne den Server zu starten.
         PostgreSQL muss bereits laufen (wird kurz gestartet und gestoppt).
         """
-        # Neue Abhängigkeiten nach git pull installieren
-        self._install_requirements()
+        # Neue Abhängigkeiten nach git pull installieren (Marker älter als requirements.txt → reinstall)
+        self._ensure_requirements()
 
         pg_was_running = self._is_postgres_running()
         if not pg_was_running and not self._start_postgres(wait=True):

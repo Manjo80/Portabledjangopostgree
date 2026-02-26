@@ -38,21 +38,25 @@ PINK = "#e91e8c"   # Marken-Pink
 PINK_DARK = "#c0156f"
 
 
+ELEFANT_BLACK = "#1c1c1c"   # Silhouetten-Schwarz
+ELEFANT_EAR   = "#2e2e2e"   # Ohr minimal heller
+
+
 def _draw_elephant(canvas: tk.Canvas, ox: int, oy: int, scale: float = 1.0,
-                   color: str = PINK) -> None:
+                   color: str = ELEFANT_BLACK) -> None:
     """
-    Zeichnet eine stilisierte Elefanten-Silhouette auf *canvas*.
+    Zeichnet eine schwarze Elefanten-Silhouette auf *canvas*.
     ox/oy = Ursprung (oben-links des Bounding-Box).
     scale = 1.0 entspricht einer Bounding-Box von 88 × 72 px.
     """
     def s(v):
         return v * scale
 
-    # Ohr (hinter Kopf, etwas dunkler)
+    # Ohr (hinter Kopf, leicht abgesetzt)
     canvas.create_oval(
         ox + s(2),  oy + s(6),
         ox + s(34), oy + s(44),
-        fill=PINK_DARK, outline="")
+        fill=ELEFANT_EAR, outline="")
 
     # Körper
     canvas.create_oval(
@@ -560,7 +564,7 @@ class AppDialog(ctk.CTkToplevel):
         self.result: dict | None = None
 
         self.title("App bearbeiten" if app else "Neue App hinzufügen")
-        self.geometry("580x940")
+        self.geometry("580x650")
         self.resizable(False, True)
         self.transient(parent)
         self.grab_set()
@@ -574,13 +578,18 @@ class AppDialog(ctk.CTkToplevel):
 
     def _build(self):
         pad = {"padx": 20, "pady": 5}
-        self.grid_columnconfigure(1, weight=1)
+
+        # ── Scrollbarer Inhaltsbereich ─────────────────────────────────────
+        cf = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        cf.pack(fill="both", expand=True)
+        cf.grid_columnconfigure(1, weight=1)
+        self._cf = cf
 
         r = 0
 
         # Titel
         ctk.CTkLabel(
-            self,
+            cf,
             text="App-Konfiguration",
             font=ctk.CTkFont(size=16, weight="bold"),
         ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20, pady=(18, 8))
@@ -588,15 +597,15 @@ class AppDialog(ctk.CTkToplevel):
 
         # Name
         self.v_name = ctk.StringVar()
-        self._lbl_row(r, "Name:", ctk.CTkEntry(self, textvariable=self.v_name)); r += 1
+        self._lbl_row(r, "Name:", ctk.CTkEntry(cf, textvariable=self.v_name)); r += 1
 
         # ── Quell-Modus Toggle ────────────────────────────────────────────
-        ctk.CTkLabel(self, text="Quelle:", anchor="w").grid(
+        ctk.CTkLabel(cf, text="Quelle:", anchor="w").grid(
             row=r, column=0, sticky="w", **pad
         )
         self.v_mode = ctk.StringVar(value="local")
         seg = ctk.CTkSegmentedButton(
-            self,
+            cf,
             values=["📁  Lokaler Ordner", "🐙  GitHub / Git"],
             variable=self.v_mode,
             command=self._on_mode_change,
@@ -605,7 +614,7 @@ class AppDialog(ctk.CTkToplevel):
         r += 1
 
         # ── Lokaler Ordner ────────────────────────────────────────────────
-        self._local_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self._local_frame = ctk.CTkFrame(cf, fg_color="transparent")
         self._local_frame.grid_columnconfigure(0, weight=1)
         self.v_source = ctk.StringVar()
         ctk.CTkEntry(
@@ -616,7 +625,7 @@ class AppDialog(ctk.CTkToplevel):
             self._local_frame, text="…", width=36, command=self._browse_local
         ).grid(row=0, column=1, padx=(6, 0))
 
-        ctk.CTkLabel(self, text="Verzeichnis:", anchor="w").grid(
+        ctk.CTkLabel(cf, text="Verzeichnis:", anchor="w").grid(
             row=r, column=0, sticky="w", **pad
         )
         self._local_frame.grid(row=r, column=1, columnspan=2, sticky="ew", **pad)
@@ -624,7 +633,7 @@ class AppDialog(ctk.CTkToplevel):
         r += 1
 
         # ── GitHub / Git ──────────────────────────────────────────────────
-        self._git_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self._git_frame = ctk.CTkFrame(cf, fg_color="transparent")
         self._git_frame.grid_columnconfigure(1, weight=1)
 
         def gf_lbl(gr, text):
@@ -675,7 +684,7 @@ class AppDialog(ctk.CTkToplevel):
             text_color="gray55", font=ctk.CTkFont(size=11),
         ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
-        ctk.CTkLabel(self, text="Repository:", anchor="w").grid(
+        ctk.CTkLabel(cf, text="Repository:", anchor="w").grid(
             row=r, column=0, sticky="nw", **pad
         )
         self._git_frame.grid(row=r, column=1, columnspan=2, sticky="ew", **pad)
@@ -684,25 +693,25 @@ class AppDialog(ctk.CTkToplevel):
 
         # Port
         self.v_port = ctk.StringVar(value="8000")
-        self._lbl_row(r, "App-Port:", ctk.CTkEntry(self, textvariable=self.v_port, width=100)); r += 1
+        self._lbl_row(r, "App-Port:", ctk.CTkEntry(cf, textvariable=self.v_port, width=100)); r += 1
 
         # Trennlinie
-        ctk.CTkFrame(self, height=1, fg_color="gray30").grid(
+        ctk.CTkFrame(cf, height=1, fg_color="gray30").grid(
             row=r, column=0, columnspan=3, sticky="ew", padx=20, pady=8
         ); r += 1
         ctk.CTkLabel(
-            self, text="Datenbank", font=ctk.CTkFont(size=13, weight="bold")
+            cf, text="Datenbank", font=ctk.CTkFont(size=13, weight="bold")
         ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20); r += 1
 
         # DB-Felder
         self.v_db_name = ctk.StringVar()
-        self._lbl_row(r, "Datenbankname:", ctk.CTkEntry(self, textvariable=self.v_db_name)); r += 1
+        self._lbl_row(r, "Datenbankname:", ctk.CTkEntry(cf, textvariable=self.v_db_name)); r += 1
 
         self.v_db_user = ctk.StringVar()
-        self._lbl_row(r, "DB-Benutzer:", ctk.CTkEntry(self, textvariable=self.v_db_user)); r += 1
+        self._lbl_row(r, "DB-Benutzer:", ctk.CTkEntry(cf, textvariable=self.v_db_user)); r += 1
 
         self.v_db_pass = ctk.StringVar()
-        pw_frame = ctk.CTkFrame(self, fg_color="transparent")
+        pw_frame = ctk.CTkFrame(cf, fg_color="transparent")
         pw_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkEntry(pw_frame, textvariable=self.v_db_pass, show="●").grid(
             row=0, column=0, sticky="ew"
@@ -711,39 +720,39 @@ class AppDialog(ctk.CTkToplevel):
             pw_frame, text="⟳", width=36,
             command=lambda: self.v_db_pass.set(_random_password()),
         ).grid(row=0, column=1, padx=(6, 0))
-        ctk.CTkLabel(self, text="DB-Passwort:", anchor="w").grid(
+        ctk.CTkLabel(cf, text="DB-Passwort:", anchor="w").grid(
             row=r, column=0, sticky="w", **pad
         )
         pw_frame.grid(row=r, column=1, columnspan=2, sticky="ew", **pad); r += 1
 
         self.v_db_port = ctk.StringVar(value="5433")
-        self._lbl_row(r, "DB-Port:", ctk.CTkEntry(self, textvariable=self.v_db_port, width=100)); r += 1
+        self._lbl_row(r, "DB-Port:", ctk.CTkEntry(cf, textvariable=self.v_db_port, width=100)); r += 1
 
         # ── Umgebungsvariablen ────────────────────────────────────────────
-        ctk.CTkFrame(self, height=1, fg_color="gray30").grid(
+        ctk.CTkFrame(cf, height=1, fg_color="gray30").grid(
             row=r, column=0, columnspan=3, sticky="ew", padx=20, pady=8
         ); r += 1
         ctk.CTkLabel(
-            self, text="Umgebungsvariablen", font=ctk.CTkFont(size=13, weight="bold")
+            cf, text="Umgebungsvariablen", font=ctk.CTkFont(size=13, weight="bold")
         ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20); r += 1
 
         # DJANGO_SETTINGS_MODULE
         self.v_settings_module = ctk.StringVar(value="core.settings")
         self._lbl_row(r, "Settings-Modul:", ctk.CTkEntry(
-            self, textvariable=self.v_settings_module,
+            cf, textvariable=self.v_settings_module,
             placeholder_text="core.settings  (z.B. myapp.settings.local)",
         )); r += 1
 
         # ALLOWED_HOSTS
         self.v_allowed_hosts = ctk.StringVar(value="localhost,127.0.0.1")
         self._lbl_row(r, "Allowed Hosts:", ctk.CTkEntry(
-            self, textvariable=self.v_allowed_hosts,
+            cf, textvariable=self.v_allowed_hosts,
             placeholder_text="localhost,127.0.0.1,meinserver.local",
         )); r += 1
 
         # SECRET_KEY
         self.v_secret_key = ctk.StringVar()
-        sk_frame = ctk.CTkFrame(self, fg_color="transparent")
+        sk_frame = ctk.CTkFrame(cf, fg_color="transparent")
         sk_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkEntry(
             sk_frame, textvariable=self.v_secret_key,
@@ -753,16 +762,16 @@ class AppDialog(ctk.CTkToplevel):
             sk_frame, text="⟳", width=36,
             command=lambda: self.v_secret_key.set(_random_password(50)),
         ).grid(row=0, column=1, padx=(6, 0))
-        ctk.CTkLabel(self, text="SECRET_KEY:", anchor="w").grid(
+        ctk.CTkLabel(cf, text="SECRET_KEY:", anchor="w").grid(
             row=r, column=0, sticky="w", **pad
         )
         sk_frame.grid(row=r, column=1, columnspan=2, sticky="ew", **pad); r += 1
 
         # Weitere benutzerdefinierte Variablen
-        ctk.CTkLabel(self, text="Weitere Vars:", anchor="w").grid(
+        ctk.CTkLabel(cf, text="Weitere Vars:", anchor="w").grid(
             row=r, column=0, sticky="nw", **pad
         )
-        self._extra_outer = ctk.CTkFrame(self, fg_color="transparent")
+        self._extra_outer = ctk.CTkFrame(cf, fg_color="transparent")
         self._extra_outer.grid(row=r, column=1, columnspan=2, sticky="ew", **pad)
         self._extra_outer.grid_columnconfigure(0, weight=1)
         self._extra_rows: list[tuple] = []
@@ -778,9 +787,9 @@ class AppDialog(ctk.CTkToplevel):
         ).pack(anchor="w", pady=(4, 0))
         r += 1
 
-        # Buttons
+        # ── Buttons (außerhalb des Scrollbereichs, immer sichtbar) ──────────
         btn = ctk.CTkFrame(self, fg_color="transparent")
-        btn.grid(row=r, column=0, columnspan=3, pady=18)
+        btn.pack(fill="x", padx=20, pady=14)
         ctk.CTkButton(btn, text="Speichern", width=140, command=self._save).pack(
             side="left", padx=8
         )
@@ -793,7 +802,7 @@ class AppDialog(ctk.CTkToplevel):
         self._on_mode_change("📁  Lokaler Ordner")
 
     def _lbl_row(self, r: int, label: str, widget):
-        ctk.CTkLabel(self, text=label, anchor="w").grid(
+        ctk.CTkLabel(self._cf, text=label, anchor="w").grid(
             row=r, column=0, sticky="w", padx=20, pady=5
         )
         widget.grid(row=r, column=1, columnspan=2, sticky="ew", padx=20, pady=5)
@@ -802,17 +811,16 @@ class AppDialog(ctk.CTkToplevel):
 
     def _on_mode_change(self, value: str):
         is_local = "Lokaler" in value
-        # Zeige/verstecke Quell-Zeilen
         if is_local:
             self._local_frame.grid()
-            ctk.CTkLabel(self, text="Verzeichnis:", anchor="w").grid(
+            ctk.CTkLabel(self._cf, text="Verzeichnis:", anchor="w").grid(
                 row=self._local_row, column=0, sticky="w", padx=20, pady=5
             )
             self._git_frame.grid_remove()
         else:
             self._local_frame.grid_remove()
             self._git_frame.grid()
-            ctk.CTkLabel(self, text="Repository:", anchor="w").grid(
+            ctk.CTkLabel(self._cf, text="Repository:", anchor="w").grid(
                 row=self._git_row, column=0, sticky="nw", padx=20, pady=5
             )
 

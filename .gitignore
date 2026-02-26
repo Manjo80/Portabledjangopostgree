@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Tool-Laufzeitdaten
+apps.db
+data/
+logs/
+backups/
+
+# Portable Laufzeitkomponenten (gross, separat herunterladen)
+python/
+postgres/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Windows
+Thumbs.db
+desktop.ini

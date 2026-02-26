@@ -18,6 +18,7 @@ import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -108,7 +109,7 @@ def _slug(text: str) -> str:
 
 # ─── SSH-Key-Manager ─────────────────────────────────────────────────────────
 
-class SshKeyDialog(ctk.CTkToplevel):
+class SshKeyDialog(tk.Toplevel):
     """
     Generiert ein Ed25519-Schlüsselpaar, zeigt den Public Key zum
     Eintragen bei GitHub und setzt den privaten Schlüsselpfad zurück.
@@ -123,10 +124,14 @@ class SshKeyDialog(ctk.CTkToplevel):
 
     def __init__(self, parent, app_slug: str = ""):
         super().__init__(parent)
+        self.configure(bg="#1a1a1a")    # dunkler Hintergrund wie CTk-Dark
         self.title("SSH-Schlüssel verwalten")
         self.geometry("530x530")
         self.resizable(False, False)
         self.transient(parent)
+        self.grab_set()
+        self.lift()
+        self.focus_force()
 
         self.result_priv_path: str = ""
         self._pub_key_text: str = ""
@@ -253,15 +258,6 @@ class SshKeyDialog(ctk.CTkToplevel):
             self, text="Übernehmen & Schließen",
             command=self._accept,
         ).pack(pady=14)
-
-        # Fenster erst nach vollständigem Rendering in den Vordergrund holen
-        # (CTkToplevel rendert schwarz wenn grab_set zu früh aufgerufen wird)
-        self.after(50, self._activate)
-
-    def _activate(self):
-        self.lift()
-        self.focus_force()
-        self.grab_set()
 
     # ── interne Methoden ──────────────────────────────────────────────────────
 

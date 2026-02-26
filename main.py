@@ -18,7 +18,6 @@ import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -37,83 +36,35 @@ REPOS_DIR = BASE_DIR / "repos"
 PINK = "#e91e8c"   # Marken-Pink
 PINK_DARK = "#c0156f"
 
+import sys as _sys
 
-ELEFANT_BLACK = "#1c1c1c"   # Silhouetten-Schwarz
-ELEFANT_EAR   = "#2e2e2e"   # Ohr minimal heller
-
-
-def _draw_elephant(canvas: tk.Canvas, ox: int, oy: int, scale: float = 1.0,
-                   color: str = ELEFANT_BLACK) -> None:
+def _load_logo_image(size: tuple) -> "ctk.CTkImage | None":
     """
-    Zeichnet eine schwarze Elefanten-Silhouette auf *canvas*.
-    ox/oy = Ursprung (oben-links des Bounding-Box).
-    scale = 1.0 entspricht einer Bounding-Box von 88 × 72 px.
+    Lädt logo.png als CTkImage.
+    Macht den Hintergrund transparent (Eckpixel-Farbe wird ausgeblendet).
+    Gibt None zurück falls PIL oder die Datei fehlt.
     """
-    def s(v):
-        return v * scale
-
-    # Ohr (hinter Kopf, leicht abgesetzt)
-    canvas.create_oval(
-        ox + s(2),  oy + s(6),
-        ox + s(34), oy + s(44),
-        fill=ELEFANT_EAR, outline="")
-
-    # Körper
-    canvas.create_oval(
-        ox + s(28), oy + s(16),
-        ox + s(88), oy + s(58),
-        fill=color, outline="")
-
-    # Kopf
-    canvas.create_oval(
-        ox + s(4),  oy + s(8),
-        ox + s(46), oy + s(46),
-        fill=color, outline="")
-
-    # Rüssel (hängt nach unten)
-    canvas.create_polygon(
-        ox + s(7),  oy + s(40),
-        ox + s(20), oy + s(40),
-        ox + s(24), oy + s(58),
-        ox + s(20), oy + s(66),
-        ox + s(12), oy + s(64),
-        ox + s(8),  oy + s(54),
-        fill=color, outline="")
-
-    # Rüssel-Spitze abrunden
-    canvas.create_oval(
-        ox + s(10), oy + s(58),
-        ox + s(24), oy + s(68),
-        fill=color, outline="")
-
-    # Beine (4 abgerundete Rechtecke)
-    for lx in [s(32), s(44), s(56), s(68)]:
-        canvas.create_rectangle(
-            ox + lx,        oy + s(52),
-            ox + lx + s(10), oy + s(72),
-            fill=color, outline="")
-        canvas.create_oval(
-            ox + lx,        oy + s(64),
-            ox + lx + s(10), oy + s(72),
-            fill=color, outline="")
-
-    # Schwanz
-    canvas.create_polygon(
-        ox + s(84), oy + s(24),
-        ox + s(92), oy + s(16),
-        ox + s(94), oy + s(26),
-        ox + s(88), oy + s(32),
-        fill=color, outline="")
-
-    # Auge (weiß + Pupille)
-    canvas.create_oval(
-        ox + s(18), oy + s(16),
-        ox + s(28), oy + s(26),
-        fill="white", outline="")
-    canvas.create_oval(
-        ox + s(21), oy + s(19),
-        ox + s(26), oy + s(24),
-        fill="#1a1a1a", outline="")
+    try:
+        from PIL import Image
+        base = Path(getattr(_sys, "_MEIPASS", Path(__file__).parent))
+        path = base / "logo.png"
+        img = Image.open(path).convert("RGBA")
+        # Hintergrundfarbe aus dem Eckpixel bestimmen und transparent machen
+        pixels = list(img.getdata())
+        bg_r, bg_g, bg_b, _ = pixels[0]
+        threshold = 28
+        new_pixels = [
+            (r, g, b, 0)
+            if (abs(r - bg_r) < threshold
+                and abs(g - bg_g) < threshold
+                and abs(b - bg_b) < threshold)
+            else (r, g, b, a)
+            for r, g, b, a in pixels
+        ]
+        img.putdata(new_pixels)
+        return ctk.CTkImage(light_image=img, dark_image=img, size=size)
+    except Exception:
+        return None
 
 
 # ─── Hilfsfunktionen ─────────────────────────────────────────────────────────
@@ -422,25 +373,31 @@ class AboutDialog(ctk.CTkToplevel):
         logo_panel = ctk.CTkFrame(self, fg_color=self._BG, corner_radius=16)
         logo_panel.pack(fill="x", padx=24, pady=(24, 0))
 
-        # Canvas für Elefant
-        cv = tk.Canvas(logo_panel, width=96, height=78,
-                       bg=self._BG, highlightthickness=0)
-        cv.pack(pady=(20, 4))
-        _draw_elephant(cv, ox=1, oy=3, scale=1.0)
-
-        ctk.CTkLabel(
-            logo_panel,
-            text="PINK ELEFANT",
-            font=ctk.CTkFont(family="Arial", size=22, weight="bold"),
-            text_color=PINK,
-        ).pack()
+        # Echtes Logo-PNG (enthält bereits "PINK ELEFANT" Text)
+        logo_img = _load_logo_image((160, 160))
+        if logo_img:
+            ctk.CTkLabel(
+                logo_panel,
+                image=logo_img,
+                text="",
+                fg_color=self._BG,
+            ).pack(pady=(16, 4))
+        else:
+            ctk.CTkLabel(
+                logo_panel,
+                text="PINK ELEFANT",
+                font=ctk.CTkFont(family="Arial", size=22, weight="bold"),
+                text_color=PINK,
+                fg_color=self._BG,
+            ).pack(pady=(20, 4))
 
         ctk.CTkLabel(
             logo_panel,
             text="Software & Webentwicklung",
             font=ctk.CTkFont(size=11),
             text_color="gray55",
-        ).pack(pady=(2, 18))
+            fg_color=self._BG,
+        ).pack(pady=(0, 18))
 
         # ── App-Info ──────────────────────────────────────────────────────
         ctk.CTkLabel(
@@ -1099,24 +1056,29 @@ class PortableDjangoManager(ctk.CTk):
         sig.grid(row=11, column=0, padx=14, pady=(0, 14), sticky="ew")
         sig.grid_columnconfigure(0, weight=1)
 
-        sig_cv = tk.Canvas(sig, width=56, height=46,
-                           bg="#111111", highlightthickness=0)
-        sig_cv.grid(row=0, column=0, pady=(10, 2))
-        _draw_elephant(sig_cv, ox=1, oy=1, scale=0.58)
-
-        ctk.CTkLabel(
-            sig, text="PINK ELEFANT",
-            font=ctk.CTkFont(family="Arial", size=11, weight="bold"),
-            text_color=PINK,
-            fg_color="#111111",
-        ).grid(row=1, column=0, pady=(0, 2))
+        # Kleines Logo in der Sidebar (PNG enthält "PINK ELEFANT" Text)
+        sig_logo_img = _load_logo_image((80, 80))
+        if sig_logo_img:
+            ctk.CTkLabel(
+                sig,
+                image=sig_logo_img,
+                text="",
+                fg_color="#111111",
+            ).grid(row=0, column=0, pady=(8, 2))
+        else:
+            ctk.CTkLabel(
+                sig, text="PINK ELEFANT",
+                font=ctk.CTkFont(family="Arial", size=11, weight="bold"),
+                text_color=PINK,
+                fg_color="#111111",
+            ).grid(row=0, column=0, pady=(10, 2))
 
         ctk.CTkLabel(
             sig, text="v1.1",
             font=ctk.CTkFont(size=9),
             text_color="gray50",
             fg_color="#111111",
-        ).grid(row=2, column=0, pady=(0, 8))
+        ).grid(row=1, column=0, pady=(0, 8))
 
         # ── Inhaltsbereich ────────────────────────────────────────────────
         content = ctk.CTkFrame(self, fg_color="transparent")

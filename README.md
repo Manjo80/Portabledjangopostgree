@@ -22,11 +22,25 @@ Jede verwaltete App bekommt ihre eigene PostgreSQL-Datenbank und läuft auf eine
 ### 1. Umgebung einrichten (einmalig)
 
 ```powershell
+# Skript entsperren (einmalig nach Download / USB-Kopie)
+Unblock-File -Path .\setup_environment.ps1
+
+# Anschließend ausführen
 .\setup_environment.ps1
 ```
 
-Lädt Python 3.12 (embeddable) und PostgreSQL 16 herunter und legt sie in `python\` bzw. `postgres\` ab.
 > **Hinweis:** PostgreSQL-Download ca. 300 MB – ausreichend Zeit einplanen.
+
+> **PowerShell-Fehler „not digitally signed"?**
+> Windows setzt beim Download oder Kopieren von USB/Netzlaufwerk ein Internet-Flag auf die Datei.
+> Lösung: `Unblock-File` (siehe oben) oder einmalig mit Bypass starten:
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File .\setup_environment.ps1
+> ```
+> Alle `.ps1`-Dateien im Ordner auf einmal entsperren:
+> ```powershell
+> Get-ChildItem C:\portable -Filter *.ps1 | Unblock-File
+> ```
 
 #### PostgreSQL-ZIP manuell bereitstellen (optional)
 
@@ -254,13 +268,31 @@ Keine weitere Konfiguration nötig. Für private Repositories kann Git nach eine
 
 ### SSH mit eigenem Schlüssel
 
+#### Option A – Schlüssel direkt im Tool erstellen (empfohlen)
+
+Im App-Dialog neben dem SSH-Feld auf **🔑** (pinker Button) klicken:
+
+| Schritt | Was passiert |
+|---|---|
+| Schlüsselname und Speicherort wählen | Standard: `~\.ssh\id_ed25519_<appname>` |
+| **🔑 Schlüsselpaar erstellen** klicken | Generiert Ed25519-Keypair via `ssh-keygen` |
+| **📋 Kopieren** | Public Key in die Zwischenablage |
+| **⬇ .pub speichern** | Public-Key-Datei exportieren (z. B. auf den Desktop) |
+| **🌐 GitHub öffnen** | Öffnet `github.com/settings/ssh/new` direkt im Browser |
+| **Übernehmen & Schließen** | Privater Schlüsselpfad wird automatisch ins SSH-Feld eingetragen |
+
+> **Public Key** → bei GitHub eintragen (öffentlich, kein Geheimnis)
+> **Private Key** → bleibt lokal auf deinem PC – niemals hochladen oder teilen!
+
+#### Option B – Bestehenden Schlüssel verwenden
+
 1. SSH-Schlüsselpaar generieren (falls noch nicht vorhanden):
-   ```cmd
+   ```powershell
    ssh-keygen -t ed25519 -C "deploy@meinserver"
    ```
-2. Öffentlichen Schlüssel (`id_ed25519.pub`) beim GitHub-Repository unter
-   **Settings → Deploy keys** hinzufügen (Read-only reicht für Clone/Pull)
-3. Im App-Dialog unter **SSH-Schlüssel** den Pfad zum privaten Schlüssel eintragen
+2. Öffentlichen Schlüssel (`id_ed25519.pub`) bei GitHub unter
+   **Settings → SSH and GPG keys → New SSH key** eintragen
+3. Im App-Dialog auf **…** klicken und den Pfad zum **privaten** Schlüssel wählen
 
 Das Tool übergibt den Schlüssel über `GIT_SSH_COMMAND` – die globale SSH-Konfiguration bleibt unberührt.
 
@@ -307,6 +339,65 @@ Den kompletten Ordner (`PortableDjangoManager\`) auf USB-Stick oder Netzlaufwerk
 Die App-Datenbanken in `data\` und Git-Klone in `repos\` bleiben dabei erhalten.
 
 **Hinweis:** Auf dem Ziel-PC keine PostgreSQL-Installation nötig – das portable PostgreSQL in `postgres\` wird direkt genutzt.
+
+---
+
+## Troubleshooting
+
+### PowerShell: „not digitally signed"
+
+**Fehlermeldung:**
+```
+File .\setup_environment.ps1 cannot be loaded. The file is not digitally signed.
+```
+
+**Ursache:** Windows setzt beim Herunterladen oder Kopieren von Dateien aus dem Internet (GitHub-Download, USB-Stick, E-Mail-Anhang) einen unsichtbaren „Zone 3"-Marker (NTFS Alternate Data Stream). `RemoteSigned` blockiert damit alle unsignierten Skripte.
+
+**Lösung 1 – Datei entsperren (einmalig, dauerhaft):**
+```powershell
+Unblock-File -Path .\setup_environment.ps1
+.\setup_environment.ps1
+```
+
+**Lösung 2 – Einmalig mit Bypass starten:**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup_environment.ps1
+```
+
+**Alle `.ps1`-Dateien im Ordner auf einmal entsperren:**
+```powershell
+Get-ChildItem C:\portable -Filter *.ps1 | Unblock-File
+```
+
+> `Unblock-File` löscht nur den Internet-Marker – es werden keine Sicherheitseinstellungen dauerhaft verändert.
+
+---
+
+### PowerShell: ExecutionPolicy setzen
+
+Falls noch keine Ausführungsrichtlinie gesetzt wurde:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Mit `[A] Yes to All` bestätigen. Danach `Unblock-File` wie oben ausführen.
+
+---
+
+### ssh-keygen nicht gefunden
+
+Der SSH-Key-Manager im Tool ruft `ssh-keygen` auf. Dieses ist seit Windows 10 (Version 1809) als optionales Feature enthalten.
+
+**Prüfen:**
+```powershell
+ssh-keygen --version
+```
+
+**Nachinstallieren (als Admin):**
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+```
 
 ---
 

@@ -1,11 +1,11 @@
 @echo off
 setlocal
 chcp 65001 > nul
-title Portable Django Tester - EXE Build
+title Portable Django Manager - EXE Build
 
 echo.
 echo  ============================================================
-echo  Portable Django Tester - EXE-Erstellung
+echo  Portable Django Manager - EXE-Erstellung
 echo  ============================================================
 echo.
 
@@ -19,7 +19,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 :: Python Scripts-Ordner dynamisch zum PATH hinzufuegen
-:: (loest "pyinstaller is not recognized" bei User-Installationen)
+:: loest "pyinstaller is not recognized" bei User-Installationen
 for /f "usebackq tokens=*" %%i in (
     `python -c "import sys,os;print(os.path.join(os.path.dirname(sys.executable),'Scripts'))"`
 ) do set PY_SCRIPTS=%%i
@@ -44,6 +44,7 @@ python -m PyInstaller ^
     --add-data "db.py;." ^
     --add-data "runner.py;." ^
     --add-data "git_manager.py;." ^
+    --add-data "logo.png;." ^
     --hidden-import customtkinter ^
     --hidden-import tkinter ^
     --hidden-import sqlite3 ^
@@ -57,20 +58,36 @@ if %ERRORLEVEL% neq 0 (
 )
 echo  [OK] EXE erstellt.
 
-echo  [3/3] Kopiere EXE in dist-Verzeichnis...
-if exist dist\PortableDjangoManager.exe (
+echo  [3/3] Kopiere EXE in Projektverzeichnis...
+set EXE_SRC=dist\PortableDjangoManager.exe
+set EXE_DST=%~dp0PortableDjangoManager.exe
+
+if exist "%EXE_SRC%" (
+    copy /Y "%EXE_SRC%" "%EXE_DST%" > nul
+    if %ERRORLEVEL% neq 0 (
+        echo  FEHLER: Kopieren fehlgeschlagen!
+        pause
+        exit /b 1
+    )
+    echo  [OK] EXE kopiert.
     echo.
     echo  ============================================================
     echo  Fertig!
-    echo  EXE: dist\PortableDjangoManager.exe
+    echo  EXE liegt jetzt hier:
+    echo    %EXE_DST%
     echo.
-    echo  Die EXE kann zusammen mit den Ordnern
-    echo    python\     (eingebettetes Python)
-    echo    postgres\   (portables PostgreSQL)
-    echo  auf einem USB-Stick oder Netzlaufwerk betrieben werden.
+    echo  Die EXE laeuft zusammen mit den Ordnern:
+    echo    python\    - eingebettetes Python
+    echo    postgres\  - portables PostgreSQL
+    echo  auf USB-Stick oder Netzlaufwerk.
+    echo.
+    echo  Aufraeum-Tipp: dist\ und build\ koennen geloescht werden.
     echo  ============================================================
 ) else (
-    echo  FEHLER: EXE nicht gefunden!
+    echo  FEHLER: EXE nicht gefunden unter %EXE_SRC%
+    echo  Bitte den PyInstaller-Log oben pruefen.
+    pause
+    exit /b 1
 )
 echo.
 pause

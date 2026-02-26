@@ -297,7 +297,7 @@ class AppRunner:
         self.log(f"  [{self.app['name']}] Django-Migrationen …")
         env = self._build_env()
         r = subprocess.run(
-            self._py_manage("migrate", "--noinput"),
+            [str(self._py), "manage.py", "migrate", "--noinput"],
             cwd=self.app["source_path"],
             env=env,
             capture_output=True, text=True,
@@ -310,7 +310,7 @@ class AppRunner:
 
         # Statische Dateien sammeln (Fehler ignorieren – nicht kritisch)
         subprocess.run(
-            self._py_manage("collectstatic", "--noinput"),
+            [str(self._py), "manage.py", "collectstatic", "--noinput"],
             cwd=self.app["source_path"],
             env=env,
             capture_output=True,
@@ -425,7 +425,7 @@ class AppRunner:
 
         env = self._build_env()
         r = subprocess.run(
-            self._py_manage("migrate", "--noinput"),
+            [str(self._py), "manage.py", "migrate", "--noinput"],
             cwd=self.app["source_path"],
             env=env,
             capture_output=True, text=True,
@@ -437,7 +437,7 @@ class AppRunner:
             self.log(f"  [{self.app['name']}] Migrationen OK.")
 
         subprocess.run(
-            self._py_manage("collectstatic", "--noinput"),
+            [str(self._py), "manage.py", "collectstatic", "--noinput"],
             cwd=self.app["source_path"],
             env=env,
             capture_output=True,
@@ -474,8 +474,8 @@ class AppRunner:
         env["DJANGO_SUPERUSER_PASSWORD"] = password
 
         r = subprocess.run(
-            self._py_manage("createsuperuser", "--noinput",
-                            f"--username={username}", f"--email={email}"),
+            [str(self._py), "manage.py", "createsuperuser",
+             "--noinput", f"--username={username}", f"--email={email}"],
             cwd=self.app["source_path"],
             env=env,
             capture_output=True, text=True,
@@ -503,22 +503,40 @@ class AppRunner:
             s.settimeout(1)
             return s.connect_ex(("127.0.0.1", self.app["db_port"])) == 0
 
-    def _py_manage(self, *args) -> list[str]:
+    def _write_site_pathfix(self):
         """
-        Erzeugt einen Python-Befehl der sys.path um source_path erweitert
-        und dann manage.py ausführt.
-        Nötig weil Embedded Python mit ._pth-Datei PYTHONPATH ignoriert.
+        Schreibt zwei Dateien in das Embedded-Python site-packages:
+          _pdjango_pathfix.py  – liest DJANGO_SRC_PATH und fügt es zu sys.path hinzu
+          _pdjango_pathfix.pth – wird von site.py beim Python-Start importiert
+
+        Damit wird source_path BEIM PYTHON-START (vor allem anderen Code) zu
+        sys.path hinzugefügt.  Embedded Python ignoriert PYTHONPATH wenn eine
+        ._pth-Datei vorhanden ist, aber .pth-Dateien in site-packages werden
+        von site.py verarbeitet (sofern 'import site' in der ._pth steht).
         """
-        src = self.app["source_path"]
-        manage = str(Path(src) / "manage.py")
-        argv = repr(["manage.py"] + list(args))
-        script = (
-            f"import sys, runpy; "
-            f"sys.path.insert(0, {src!r}); "
-            f"sys.argv = {argv}; "
-            f"runpy.run_path({manage!r}, run_name='__main__')"
+        if sys.platform != "win32":
+            return
+        site_pkgs = self.python_dir / "Lib" / "site-packages"
+        if not site_pkgs.is_dir():
+            return
+
+        module_content = (
+            "import os, sys\n"
+            "_s = os.environ.get('DJANGO_SRC_PATH')\n"
+            "if _s and _s not in sys.path:\n"
+            "    sys.path.insert(0, _s)\n"
         )
-        return [str(self._py), "-c", script]
+        pth_content = "import _pdjango_pathfix\n"
+
+        try:
+            module_file = site_pkgs / "_pdjango_pathfix.py"
+            if not module_file.exists() or module_file.read_text(encoding="utf-8") != module_content:
+                module_file.write_text(module_content, encoding="utf-8")
+            pth_file = site_pkgs / "_pdjango_pathfix.pth"
+            if not pth_file.exists() or pth_file.read_text(encoding="utf-8") != pth_content:
+                pth_file.write_text(pth_content, encoding="utf-8")
+        except OSError:
+            pass  # Fallback: src wird per cwd gefunden wenn manage.py im source_path liegt
 
     # ─── Django ────────────────────────────────────────────────────────────
 
@@ -528,7 +546,8 @@ class AppRunner:
         self._write_dotenv(env)
         with self._lock:
             self._dj_proc = subprocess.Popen(
-                self._py_manage("runserver", f"0.0.0.0:{self.app['port']}"),
+                [str(self._py), "manage.py", "runserver",
+                 f"0.0.0.0:{self.app['port']}"],
                 cwd=self.app["source_path"],
                 env=env,
                 stdout=subprocess.PIPE,
@@ -575,6 +594,13 @@ class AppRunner:
             env.update({k: str(v) for k, v in extra.items() if k})
         except (json.JSONDecodeError, TypeError):
             pass
+        # DJANGO_SRC_PATH: von _pdjango_pathfix.py beim Python-Start eingelesen
+        # Embedded Python ignoriert PYTHONPATH (._pth-Datei), daher dieser Umweg
+        src = self.app.get("source_path", "")
+        if src:
+            env["DJANGO_SRC_PATH"] = str(Path(src))
+        # Sicherstellen dass die site-packages-Pathfix-Dateien existieren
+        self._write_site_pathfix()
         # Portable Python/PostgreSQL lib-Verzeichnis einbinden
         pg_lib = self.postgres_dir / "lib"
         if pg_lib.exists():

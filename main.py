@@ -175,6 +175,8 @@ class SshKeyDialog(ctk.CTkToplevel):
         self.title("SSH-Schlüssel verwalten")
         self.geometry("530x530")
         self.resizable(False, False)
+        self.transient(parent)
+        self.lift()
         self.grab_set()
 
         self.result_priv_path: str = ""

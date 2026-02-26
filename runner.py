@@ -297,7 +297,7 @@ class AppRunner:
         self.log(f"  [{self.app['name']}] Django-Migrationen …")
         env = self._build_env()
         r = subprocess.run(
-            [str(self._py), "manage.py", "migrate", "--noinput"],
+            self._py_manage("migrate", "--noinput"),
             cwd=self.app["source_path"],
             env=env,
             capture_output=True, text=True,
@@ -310,7 +310,7 @@ class AppRunner:
 
         # Statische Dateien sammeln (Fehler ignorieren – nicht kritisch)
         subprocess.run(
-            [str(self._py), "manage.py", "collectstatic", "--noinput"],
+            self._py_manage("collectstatic", "--noinput"),
             cwd=self.app["source_path"],
             env=env,
             capture_output=True,
@@ -425,7 +425,7 @@ class AppRunner:
 
         env = self._build_env()
         r = subprocess.run(
-            [str(self._py), "manage.py", "migrate", "--noinput"],
+            self._py_manage("migrate", "--noinput"),
             cwd=self.app["source_path"],
             env=env,
             capture_output=True, text=True,
@@ -437,7 +437,7 @@ class AppRunner:
             self.log(f"  [{self.app['name']}] Migrationen OK.")
 
         subprocess.run(
-            [str(self._py), "manage.py", "collectstatic", "--noinput"],
+            self._py_manage("collectstatic", "--noinput"),
             cwd=self.app["source_path"],
             env=env,
             capture_output=True,
@@ -474,12 +474,8 @@ class AppRunner:
         env["DJANGO_SUPERUSER_PASSWORD"] = password
 
         r = subprocess.run(
-            [
-                str(self._py), "manage.py", "createsuperuser",
-                "--noinput",
-                f"--username={username}",
-                f"--email={email}",
-            ],
+            self._py_manage("createsuperuser", "--noinput",
+                            f"--username={username}", f"--email={email}"),
             cwd=self.app["source_path"],
             env=env,
             capture_output=True, text=True,
@@ -494,12 +490,35 @@ class AppRunner:
         return False, err or "Unbekannter Fehler beim Erstellen des Superusers."
 
     def _is_postgres_running(self) -> bool:
+        # Primär: pg_ctl status
         r = subprocess.run(
             [str(self._pg_ctl), "status", "-D", str(self.data_dir)],
             capture_output=True,
             env=self._pg_env(), creationflags=_NO_WIN,
         )
-        return r.returncode == 0
+        if r.returncode == 0:
+            return True
+        # Fallback: TCP-Verbindungscheck auf den DB-Port
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            return s.connect_ex(("127.0.0.1", self.app["db_port"])) == 0
+
+    def _py_manage(self, *args) -> list[str]:
+        """
+        Erzeugt einen Python-Befehl der sys.path um source_path erweitert
+        und dann manage.py ausführt.
+        Nötig weil Embedded Python mit ._pth-Datei PYTHONPATH ignoriert.
+        """
+        src = self.app["source_path"]
+        manage = str(Path(src) / "manage.py")
+        argv = repr(["manage.py"] + list(args))
+        script = (
+            f"import sys, runpy; "
+            f"sys.path.insert(0, {src!r}); "
+            f"sys.argv = {argv}; "
+            f"runpy.run_path({manage!r}, run_name='__main__')"
+        )
+        return [str(self._py), "-c", script]
 
     # ─── Django ────────────────────────────────────────────────────────────
 
@@ -509,8 +528,7 @@ class AppRunner:
         self._write_dotenv(env)
         with self._lock:
             self._dj_proc = subprocess.Popen(
-                [str(self._py), "manage.py", "runserver",
-                 f"0.0.0.0:{self.app['port']}"],
+                self._py_manage("runserver", f"0.0.0.0:{self.app['port']}"),
                 cwd=self.app["source_path"],
                 env=env,
                 stdout=subprocess.PIPE,
@@ -557,11 +575,6 @@ class AppRunner:
             env.update({k: str(v) for k, v in extra.items() if k})
         except (json.JSONDecodeError, TypeError):
             pass
-        # PYTHONPATH: source_path einbinden damit Django-Module gefunden werden
-        # (Embedded Python fügt cwd nicht automatisch zu sys.path hinzu)
-        src_path = str(Path(self.app["source_path"]))
-        existing_pp = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = (src_path + os.pathsep + existing_pp).rstrip(os.pathsep)
         # Portable Python/PostgreSQL lib-Verzeichnis einbinden
         pg_lib = self.postgres_dir / "lib"
         if pg_lib.exists():

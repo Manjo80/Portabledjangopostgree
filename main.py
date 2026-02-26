@@ -13,6 +13,7 @@ Paketieren: build_exe.bat  (erzeugt portable .exe via PyInstaller)
 import json
 import secrets
 import string
+import subprocess
 import threading
 import webbrowser
 from datetime import datetime
@@ -148,6 +149,252 @@ def _random_password(length: int = 20) -> str:
 
 def _slug(text: str) -> str:
     return text.lower().strip().replace(" ", "_").replace("-", "_")
+
+
+# ─── SSH-Key-Manager ─────────────────────────────────────────────────────────
+
+class SshKeyDialog(ctk.CTkToplevel):
+    """
+    Generiert ein Ed25519-Schlüsselpaar, zeigt den Public Key zum
+    Eintragen bei GitHub und setzt den privaten Schlüsselpfad zurück.
+
+    Aufruf:
+        dlg = SshKeyDialog(parent, app_slug="meinprojekt")
+        parent.wait_window(dlg)
+        priv_path = dlg.result_priv_path   # "" wenn abgebrochen
+    """
+
+    GITHUB_SSH_URL = "https://github.com/settings/ssh/new"
+
+    def __init__(self, parent, app_slug: str = ""):
+        super().__init__(parent)
+        self.title("SSH-Schlüssel verwalten")
+        self.geometry("530x530")
+        self.resizable(False, False)
+        self.grab_set()
+
+        self.result_priv_path: str = ""
+        self._pub_key_text: str = ""
+
+        pad = {"padx": 20, "pady": 4}
+
+        # ── Kopfzeile ─────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            self,
+            text="SSH-Schlüsselpaar erstellen",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).pack(**pad, pady=(20, 4))
+
+        ctk.CTkLabel(
+            self,
+            text=(
+                "Erstellt einen neuen Ed25519-Schlüssel.\n"
+                "Den Public Key trägst du bei GitHub ein,\n"
+                "der Private Key bleibt auf deinem PC."
+            ),
+            text_color="gray55",
+            font=ctk.CTkFont(size=11),
+            justify="left",
+        ).pack(padx=20, pady=(0, 8), anchor="w")
+
+        ctk.CTkFrame(self, height=1, fg_color="gray30").pack(fill="x", padx=20, pady=4)
+
+        # ── Schlüsselname ────────────────────────────────────────────────
+        ctk.CTkLabel(self, text="Schlüsselname:", anchor="w").pack(
+            fill="x", padx=20, pady=(10, 0))
+        self.v_keyname = ctk.StringVar(
+            value=f"id_ed25519_{app_slug}" if app_slug else "id_ed25519_portable"
+        )
+        ctk.CTkEntry(self, textvariable=self.v_keyname).pack(
+            fill="x", padx=20, pady=(2, 0))
+
+        # ── Speicherort ───────────────────────────────────────────────────
+        ctk.CTkLabel(self, text="Speicherort:", anchor="w").pack(
+            fill="x", padx=20, pady=(10, 0))
+        loc_row = ctk.CTkFrame(self, fg_color="transparent")
+        loc_row.pack(fill="x", padx=20, pady=(2, 0))
+        loc_row.grid_columnconfigure(0, weight=1)
+        self.v_key_dir = ctk.StringVar(value=str(Path.home() / ".ssh"))
+        ctk.CTkEntry(loc_row, textvariable=self.v_key_dir).grid(
+            row=0, column=0, sticky="ew")
+        ctk.CTkButton(
+            loc_row, text="…", width=36,
+            command=self._browse_dir,
+        ).grid(row=0, column=1, padx=(6, 0))
+
+        # ── Erstellen-Button ──────────────────────────────────────────────
+        self._gen_btn = ctk.CTkButton(
+            self, text="🔑  Schlüsselpaar erstellen",
+            command=self._generate,
+        )
+        self._gen_btn.pack(padx=20, pady=14, fill="x")
+
+        # ── Statuszeile ───────────────────────────────────────────────────
+        self._status_lbl = ctk.CTkLabel(
+            self, text="", text_color="gray55",
+            font=ctk.CTkFont(size=11),
+        )
+        self._status_lbl.pack(padx=20)
+
+        ctk.CTkFrame(self, height=1, fg_color="gray30").pack(
+            fill="x", padx=20, pady=(8, 4))
+
+        # ── Public-Key-Anzeige ────────────────────────────────────────────
+        pub_hdr = ctk.CTkFrame(self, fg_color="transparent")
+        pub_hdr.pack(fill="x", padx=20, pady=(4, 0))
+        ctk.CTkLabel(
+            pub_hdr,
+            text="Public Key  →  bei GitHub eintragen:",
+            font=ctk.CTkFont(weight="bold"),
+            anchor="w",
+        ).pack(side="left")
+        ctk.CTkLabel(
+            pub_hdr,
+            text="(für GitHub — öffentlich, kein Geheimnis)",
+            text_color=PINK,
+            font=ctk.CTkFont(size=10),
+        ).pack(side="left", padx=(8, 0))
+
+        self._pub_box = ctk.CTkTextbox(self, height=72, wrap="word",
+                                        font=ctk.CTkFont(family="Courier", size=10))
+        self._pub_box.pack(fill="x", padx=20, pady=(4, 0))
+        self._pub_box.configure(state="disabled")
+
+        # ── Aktions-Buttons für Public Key ────────────────────────────────
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=8)
+        ctk.CTkButton(
+            btn_row, text="📋  Kopieren",
+            width=130,
+            command=self._copy_pub,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            btn_row, text="⬇  .pub speichern",
+            width=140,
+            fg_color="gray40", hover_color="gray30",
+            command=self._save_pub,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            btn_row, text="🌐  GitHub öffnen",
+            width=140,
+            fg_color="gray40", hover_color="gray30",
+            command=lambda: webbrowser.open(self.GITHUB_SSH_URL),
+        ).pack(side="left")
+
+        # ── Hinweis Private Key ───────────────────────────────────────────
+        ctk.CTkLabel(
+            self,
+            text=(
+                "⚠  Private Key (.pem / id_*) — niemals hochladen oder teilen!\n"
+                "   Nach dem Erstellen wird der Pfad automatisch ins SSH-Feld übernommen."
+            ),
+            text_color="gray50",
+            font=ctk.CTkFont(size=10),
+            justify="left",
+        ).pack(padx=20, anchor="w")
+
+        # ── Schließen ─────────────────────────────────────────────────────
+        ctk.CTkButton(
+            self, text="Übernehmen & Schließen",
+            command=self._accept,
+        ).pack(pady=14)
+
+    # ── interne Methoden ──────────────────────────────────────────────────────
+
+    def _browse_dir(self):
+        d = filedialog.askdirectory(
+            title="Speicherort wählen",
+            initialdir=self.v_key_dir.get(),
+            parent=self,
+        )
+        if d:
+            self.v_key_dir.set(d)
+
+    def _generate(self):
+        key_dir  = Path(self.v_key_dir.get().strip())
+        key_name = self.v_keyname.get().strip()
+        if not key_name:
+            self._set_status("⚠ Bitte einen Schlüsselnamen eingeben.", "orange")
+            return
+
+        key_dir.mkdir(parents=True, exist_ok=True)
+        priv_path = key_dir / key_name
+        pub_path  = key_dir / f"{key_name}.pub"
+
+        if priv_path.exists():
+            self._set_status(
+                f"⚠  '{key_name}' existiert bereits. Namen ändern oder Datei löschen.",
+                "orange"
+            )
+            return
+
+        try:
+            result = subprocess.run(
+                [
+                    "ssh-keygen",
+                    "-t", "ed25519",
+                    "-f", str(priv_path),
+                    "-N", "",          # kein Passwort
+                    "-C", f"portable-django-{key_name}",
+                ],
+                capture_output=True, text=True, timeout=15,
+            )
+        except FileNotFoundError:
+            self._set_status(
+                "⚠  ssh-keygen nicht gefunden. OpenSSH unter Windows installieren.", "red"
+            )
+            return
+        except subprocess.TimeoutExpired:
+            self._set_status("⚠  Zeitüberschreitung bei ssh-keygen.", "red")
+            return
+
+        if result.returncode != 0:
+            self._set_status(f"⚠  Fehler: {result.stderr.strip()}", "red")
+            return
+
+        # Public Key einlesen und anzeigen
+        self._pub_key_text = pub_path.read_text(encoding="utf-8").strip()
+        self._pub_box.configure(state="normal")
+        self._pub_box.delete("1.0", "end")
+        self._pub_box.insert("1.0", self._pub_key_text)
+        self._pub_box.configure(state="disabled")
+
+        self.result_priv_path = str(priv_path)
+        self._set_status(
+            f"✅  Schlüssel erstellt: {priv_path.name}  (+ {key_name}.pub)",
+            "green"
+        )
+
+    def _copy_pub(self):
+        if not self._pub_key_text:
+            self._set_status("⚠  Zuerst einen Schlüssel erstellen.", "orange")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(self._pub_key_text)
+        self._set_status("✅  Public Key in Zwischenablage kopiert.", "green")
+
+    def _save_pub(self):
+        if not self._pub_key_text:
+            self._set_status("⚠  Zuerst einen Schlüssel erstellen.", "orange")
+            return
+        dest = filedialog.asksaveasfilename(
+            title="Public Key speichern (.pub)",
+            defaultextension=".pub",
+            filetypes=[("Public Key", "*.pub"), ("Alle Dateien", "*")],
+            initialfile=f"{self.v_keyname.get()}.pub",
+            initialdir=str(Path.home() / "Desktop"),
+            parent=self,
+        )
+        if dest:
+            Path(dest).write_text(self._pub_key_text, encoding="utf-8")
+            self._set_status(f"✅  Public Key gespeichert: {Path(dest).name}", "green")
+
+    def _accept(self):
+        self.destroy()
+
+    def _set_status(self, msg: str, color: str = "gray55"):
+        colors = {"green": "#4caf50", "orange": "#ff9800", "red": "#f44336", "gray55": "gray55"}
+        self._status_lbl.configure(text=msg, text_color=colors.get(color, color))
 
 
 # ─── About-Dialog ────────────────────────────────────────────────────────────
@@ -409,13 +656,21 @@ class AppDialog(ctk.CTkToplevel):
             placeholder_text="Leer lassen für HTTPS / Standard-SSH",
         ).grid(row=0, column=0, sticky="ew")
         ctk.CTkButton(
-            ssh_row, text="…", width=36, command=self._browse_ssh_key
+            ssh_row, text="…", width=36, command=self._browse_ssh_key,
         ).grid(row=0, column=1, padx=(6, 0))
+        ctk.CTkButton(
+            ssh_row, text="🔑", width=36,
+            fg_color=PINK, hover_color=PINK_DARK,
+            command=self._open_ssh_manager,
+        ).grid(row=0, column=2, padx=(4, 0))
         ssh_row.grid(row=2, column=1, columnspan=2, sticky="ew", pady=4)
 
         ctk.CTkLabel(
             self._git_frame,
-            text="HTTPS: kein Schlüssel nötig  ·  SSH: Pfad zum privaten Schlüssel (id_rsa o.ä.)",
+            text=(
+                "HTTPS: kein Schlüssel nötig  ·  SSH: privaten Schlüssel wählen  ·  "
+                "🔑 = neuen Schlüssel erstellen & für GitHub exportieren"
+            ),
             text_color="gray55", font=ctk.CTkFont(size=11),
         ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
@@ -580,13 +835,24 @@ class AppDialog(ctk.CTkToplevel):
 
     def _browse_ssh_key(self):
         path = filedialog.askopenfilename(
-            title="SSH-Schlüssel wählen",
-            filetypes=[("Alle Dateien", "*"), ("PEM / RSA", "*.pem *.rsa")],
+            title="Privaten SSH-Schlüssel wählen",
+            filetypes=[
+                ("Private Keys", "id_* *.pem *.rsa *.key"),
+                ("Alle Dateien", "*"),
+            ],
             initialdir=Path.home() / ".ssh",
             parent=self,
         )
         if path:
             self.v_ssh_key.set(path)
+
+    def _open_ssh_manager(self):
+        """Öffnet den SSH-Key-Manager; übernimmt den privaten Schlüsselpfad."""
+        slug = _slug(self.v_name.get()) if self.v_name.get().strip() else "app"
+        dlg = SshKeyDialog(self, app_slug=slug)
+        self.wait_window(dlg)
+        if dlg.result_priv_path:
+            self.v_ssh_key.set(dlg.result_priv_path)
 
     def _autofill_from_name(self, name: str):
         """Füllt DB-Felder aus wenn noch leer."""

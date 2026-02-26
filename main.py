@@ -127,8 +127,6 @@ class SshKeyDialog(ctk.CTkToplevel):
         self.geometry("530x530")
         self.resizable(False, False)
         self.transient(parent)
-        self.lift()
-        self.grab_set()
 
         self.result_priv_path: str = ""
         self._pub_key_text: str = ""
@@ -256,6 +254,15 @@ class SshKeyDialog(ctk.CTkToplevel):
             command=self._accept,
         ).pack(pady=14)
 
+        # Fenster erst nach vollständigem Rendering in den Vordergrund holen
+        # (CTkToplevel rendert schwarz wenn grab_set zu früh aufgerufen wird)
+        self.after(50, self._activate)
+
+    def _activate(self):
+        self.lift()
+        self.focus_force()
+        self.grab_set()
+
     # ── interne Methoden ──────────────────────────────────────────────────────
 
     def _browse_dir(self):
@@ -366,8 +373,9 @@ class AboutDialog(ctk.CTkToplevel):
         self.title("Über Portable Django Manager")
         self.geometry("420x440")
         self.resizable(False, False)
-        self.grab_set()
         self.configure(fg_color=("gray95", "#1a1a1a"))
+        self.transient(parent)
+        self.after(50, lambda: (self.lift(), self.focus_force(), self.grab_set()))
 
         # ── Logo-Panel ────────────────────────────────────────────────────
         logo_panel = ctk.CTkFrame(self, fg_color=self._BG, corner_radius=16)
@@ -452,7 +460,8 @@ class SuperuserDialog(ctk.CTkToplevel):
         self.title("Django-Superuser erstellen")
         self.geometry("400x295")
         self.resizable(False, False)
-        self.grab_set()
+        self.transient(parent)
+        self.after(50, lambda: (self.lift(), self.focus_force(), self.grab_set()))
         self.result: dict | None = None
 
         pad = {"padx": 22, "pady": 7}
@@ -526,8 +535,7 @@ class AppDialog(ctk.CTkToplevel):
         self.geometry("580x650")
         self.resizable(False, True)
         self.transient(parent)
-        self.grab_set()
-        self.lift()
+        self.after(50, lambda: (self.lift(), self.focus_force(), self.grab_set()))
 
         self._build()
         if app:

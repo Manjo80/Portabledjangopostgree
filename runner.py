@@ -4,6 +4,7 @@ Startet/stoppt für jede App eine eigene PostgreSQL-Datenbank und
 einen Django-Entwicklungsserver.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -286,6 +287,7 @@ class AppRunner:
     def _start_django(self) -> bool:
         self.log(f"  [{self.app['name']}] Starte Django (Port {self.app['port']}) …")
         env = self._build_env()
+        self._write_dotenv(env)
         with self._lock:
             self._dj_proc = subprocess.Popen(
                 [str(self._py), "manage.py", "runserver",
@@ -318,16 +320,54 @@ class AppRunner:
             "DB_HOST":   "127.0.0.1",
             "DB_PORT":   str(self.app["db_port"]),
             "DEBUG":     "True",
-            "DJANGO_SETTINGS_MODULE": "core.settings",
+            "ALLOWED_HOSTS": self.app.get("allowed_hosts", "localhost,127.0.0.1"),
+            "DJANGO_SETTINGS_MODULE": self.app.get("settings_module", "core.settings"),
             "DATABASE_URL": (
                 f"postgresql://{self.app['db_user']}:"
                 f"{self.app['db_password']}@127.0.0.1:"
                 f"{self.app['db_port']}/{self.app['db_name']}"
             ),
         })
+        # SECRET_KEY nur setzen wenn explizit konfiguriert
+        sk = self.app.get("secret_key", "")
+        if sk:
+            env["SECRET_KEY"] = sk
+        # Weitere benutzerdefinierte Variablen
+        try:
+            extra = json.loads(self.app.get("extra_env") or "{}")
+            env.update({k: str(v) for k, v in extra.items() if k})
+        except (json.JSONDecodeError, TypeError):
+            pass
         # Portable Python/PostgreSQL lib-Verzeichnis einbinden
         pg_lib = self.postgres_dir / "lib"
         if pg_lib.exists():
             path = env.get("PATH", "")
             env["PATH"] = f"{pg_lib}{os.pathsep}{path}"
         return env
+
+    def _write_dotenv(self, env: dict):
+        """Schreibt eine .env-Datei ins App-Quellverzeichnis."""
+        src = Path(self.app.get("source_path", ""))
+        if not src.is_dir():
+            return
+        # Feste managed-Keys in sinnvoller Reihenfolge
+        managed_keys = [
+            "DEBUG", "SECRET_KEY", "ALLOWED_HOSTS", "DJANGO_SETTINGS_MODULE",
+            "DB_NAME", "DB_USER", "DB_PASS", "DB_HOST", "DB_PORT", "DATABASE_URL",
+        ]
+        # Benutzerdefinierte Extra-Keys aus der Konfiguration
+        try:
+            extra_keys = list(json.loads(self.app.get("extra_env") or "{}").keys())
+        except (json.JSONDecodeError, TypeError):
+            extra_keys = []
+        lines = []
+        for k in managed_keys + extra_keys:
+            if k in env:
+                v = env[k]
+                # Werte mit Komma oder Leerzeichen in Anführungszeichen
+                lines.append(f'{k}="{v}"\n' if ("," in v or " " in v) else f"{k}={v}\n")
+        try:
+            (src / ".env").write_text("".join(lines), encoding="utf-8")
+            self.log(f"  [{self.app['name']}] .env aktualisiert.")
+        except OSError as exc:
+            self.log(f"  [{self.app['name']}] .env konnte nicht geschrieben werden: {exc}")

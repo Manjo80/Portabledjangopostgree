@@ -6,6 +6,7 @@ einen Django-Entwicklungsserver.
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -86,6 +87,18 @@ class AppRunner:
         try:
             with self._lock:
                 self._running = True
+
+            # Port-Konflikt prüfen bevor irgendetwas gestartet wird
+            if not self._is_port_free(self.app["port"]):
+                self.log(
+                    f"[{self.app['name']}] FEHLER: Port {self.app['port']} ist bereits "
+                    f"belegt. Bitte einen anderen Port konfigurieren."
+                )
+                with self._lock:
+                    self._running = False
+                if on_complete:
+                    on_complete(False)
+                return
 
             if self._setup_needed():
                 self.log(f"[{self.app['name']}] Ersteinrichtung läuft …")
@@ -302,6 +315,51 @@ class AppRunner:
             self._stop_postgres()
 
         return r.returncode == 0
+
+    def _is_port_free(self, port: int) -> bool:
+        """True wenn der TCP-Port auf localhost gerade nicht belegt ist."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            return s.connect_ex(("127.0.0.1", port)) != 0
+
+    def setup_done(self) -> bool:
+        """True sobald die Ersteinrichtung (initdb) abgeschlossen wurde."""
+        return (self.data_dir / "PG_VERSION").exists()
+
+    def create_superuser(
+        self, username: str, email: str, password: str
+    ) -> tuple[bool, str]:
+        """
+        Legt einen Django-Superuser an.
+        Startet PostgreSQL kurz, falls es nicht läuft.
+        Gibt (success, nachricht) zurück.
+        """
+        pg_was_running = self._is_postgres_running()
+        if not pg_was_running and not self._start_postgres(wait=True):
+            return False, "PostgreSQL konnte nicht gestartet werden."
+
+        env = self._build_env()
+        env["DJANGO_SUPERUSER_PASSWORD"] = password
+
+        r = subprocess.run(
+            [
+                str(self._py), "manage.py", "createsuperuser",
+                "--noinput",
+                f"--username={username}",
+                f"--email={email}",
+            ],
+            cwd=self.app["source_path"],
+            env=env,
+            capture_output=True, text=True,
+        )
+
+        if not pg_was_running:
+            self._stop_postgres()
+
+        if r.returncode == 0:
+            return True, f"Superuser '{username}' wurde erfolgreich erstellt."
+        err = (r.stderr or r.stdout).strip()
+        return False, err or "Unbekannter Fehler beim Erstellen des Superusers."
 
     def _is_postgres_running(self) -> bool:
         r = subprocess.run(

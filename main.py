@@ -71,6 +71,71 @@ def _slug(text: str) -> str:
     return text.lower().strip().replace(" ", "_").replace("-", "_")
 
 
+# ─── Superuser-Dialog ────────────────────────────────────────────────────────
+
+class SuperuserDialog(ctk.CTkToplevel):
+    """Kleiner Dialog zum Erstellen eines Django-Superusers."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Django-Superuser erstellen")
+        self.geometry("400x295")
+        self.resizable(False, False)
+        self.grab_set()
+        self.result: dict | None = None
+
+        pad = {"padx": 22, "pady": 7}
+        self.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(self, text="Benutzername:", anchor="w").grid(
+            row=0, column=0, sticky="w", **pad)
+        self.v_user = ctk.StringVar(value="admin")
+        ctk.CTkEntry(self, textvariable=self.v_user).grid(
+            row=0, column=1, sticky="ew", **pad)
+
+        ctk.CTkLabel(self, text="E-Mail:", anchor="w").grid(
+            row=1, column=0, sticky="w", **pad)
+        self.v_email = ctk.StringVar(value="admin@example.com")
+        ctk.CTkEntry(self, textvariable=self.v_email).grid(
+            row=1, column=1, sticky="ew", **pad)
+
+        ctk.CTkLabel(self, text="Passwort:", anchor="w").grid(
+            row=2, column=0, sticky="w", **pad)
+        self.v_pass = ctk.StringVar()
+        ctk.CTkEntry(self, textvariable=self.v_pass, show="●").grid(
+            row=2, column=1, sticky="ew", **pad)
+
+        ctk.CTkLabel(self, text="Passwort (wdh.):", anchor="w").grid(
+            row=3, column=0, sticky="w", **pad)
+        self.v_pass2 = ctk.StringVar()
+        ctk.CTkEntry(self, textvariable=self.v_pass2, show="●").grid(
+            row=3, column=1, sticky="ew", **pad)
+
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.grid(row=4, column=0, columnspan=2, pady=18)
+        ctk.CTkButton(btns, text="Erstellen", width=140,
+                      command=self._save).pack(side="left", padx=8)
+        ctk.CTkButton(btns, text="Abbrechen", width=140,
+                      command=self.destroy).pack(side="left", padx=8)
+
+    def _save(self):
+        u = self.v_user.get().strip()
+        e = self.v_email.get().strip()
+        p  = self.v_pass.get()
+        p2 = self.v_pass2.get()
+        if not u:
+            messagebox.showwarning("Eingabe fehlt", "Benutzername darf nicht leer sein.", parent=self)
+            return
+        if not p:
+            messagebox.showwarning("Eingabe fehlt", "Passwort darf nicht leer sein.", parent=self)
+            return
+        if p != p2:
+            messagebox.showwarning("Passwort", "Die Passwörter stimmen nicht überein.", parent=self)
+            return
+        self.result = {"username": u, "email": e, "password": p}
+        self.destroy()
+
+
 # ─── App-Dialog (Hinzufügen / Bearbeiten) ────────────────────────────────────
 
 class AppDialog(ctk.CTkToplevel):
@@ -707,6 +772,15 @@ class PortableDjangoManager(ctk.CTk):
                 command=lambda a=app: self._update_repo(a),
             ).pack(side="left", padx=2)
 
+        # Superuser-Button (nur wenn initdb bereits gelaufen ist)
+        app_data_dir = BASE_DIR / "data" / f"app_{app['id']}"
+        if (app_data_dir / "PG_VERSION").exists():
+            ctk.CTkButton(
+                btns, text="👤", width=36,
+                fg_color="gray40", hover_color="#8e44ad",
+                command=lambda a=app: self._create_superuser(a),
+            ).pack(side="left", padx=2)
+
         ctk.CTkButton(
             btns, text="✏", width=36,
             fg_color="gray40", hover_color="gray30",
@@ -814,6 +888,29 @@ class PortableDjangoManager(ctk.CTk):
 
     def _open_browser(self, app: dict):
         webbrowser.open(f"http://localhost:{app['port']}")
+
+    def _create_superuser(self, app: dict):
+        dlg = SuperuserDialog(self)
+        self.wait_window(dlg)
+        if not dlg.result:
+            return
+        d = dlg.result
+        # Temporären Runner nutzen (oder laufenden, falls vorhanden)
+        runner = self.runners.get(app["id"]) or AppRunner(
+            app, base_dir=BASE_DIR, log_callback=self._log_thread_safe
+        )
+        self._log(f"👤 Erstelle Superuser '{d['username']}' für '{app['name']}' …")
+
+        def _run():
+            ok, msg = runner.create_superuser(d["username"], d["email"], d["password"])
+            symbol = "✅" if ok else "❌"
+            self._log_thread_safe(f"  {symbol} {msg}")
+            if ok:
+                self.after(0, lambda: messagebox.showinfo("Superuser", msg, parent=self))
+            else:
+                self.after(0, lambda: messagebox.showerror("Fehler", msg, parent=self))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     # ─── GitHub Update ────────────────────────────────────────────────────
 

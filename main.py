@@ -123,6 +123,7 @@ class SshKeyDialog(ctk.CTkToplevel):
 
     def __init__(self, parent, app_slug: str = ""):
         super().__init__(parent)
+        self.withdraw()          # versteckt während Aufbau → kein schwarzes Flackern
         self.title("SSH-Schlüssel verwalten")
         self.geometry("530x530")
         self.resizable(False, False)
@@ -259,6 +260,7 @@ class SshKeyDialog(ctk.CTkToplevel):
         self.after(50, self._activate)
 
     def _activate(self):
+        self.deiconify()     # jetzt erst sichtbar machen
         self.lift()
         self.focus_force()
         self.grab_set()
@@ -825,8 +827,10 @@ class AppDialog(ctk.CTkToplevel):
     def _open_ssh_manager(self):
         """Öffnet den SSH-Key-Manager; übernimmt den privaten Schlüsselpfad."""
         slug = _slug(self.v_name.get()) if self.v_name.get().strip() else "app"
+        self.grab_release()          # Eltern-Grab freigeben → Kind-Dialog kann rendern
         dlg = SshKeyDialog(self, app_slug=slug)
         self.wait_window(dlg)
+        self.grab_set()              # Eltern-Grab nach Schließen wiederherstellen
         if dlg.result_priv_path:
             self.v_ssh_key.set(dlg.result_priv_path)
 

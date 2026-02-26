@@ -113,6 +113,99 @@ Beim Speichern wird das Repository sofort geklont (`git clone --depth 1`).
 
 ---
 
+## Umgebungsvariablen & .env-Datei
+
+Im App-Dialog gibt es den Abschnitt **Umgebungsvariablen** mit folgenden Feldern:
+
+| Feld | Standard | Bedeutung |
+|---|---|---|
+| **Settings-Modul** | `core.settings` | `DJANGO_SETTINGS_MODULE` – Pfad zum Django-Settings-Modul, z. B. `myapp.settings.dev` |
+| **Allowed Hosts** | `localhost,127.0.0.1` | Kommagetrennte Liste erlaubter Hosts; wichtig wenn die App über eine IP oder einen Hostnamen erreichbar sein soll |
+| **SECRET_KEY** | *(leer)* | Überschreibt den `SECRET_KEY` aus `settings.py`. Mit ⟳ wird automatisch ein sicherer Zufallswert erzeugt |
+| **Weitere Vars** | – | Beliebige eigene KEY=VALUE-Paare (z. B. API-Keys, E-Mail-Config, Feature-Flags) |
+
+### .env-Datei wird automatisch erstellt
+
+Beim **Start** einer App schreibt das Tool automatisch eine `.env`-Datei ins App-Quellverzeichnis. Inhalt:
+
+```
+DEBUG="True"
+ALLOWED_HOSTS="localhost,127.0.0.1"
+DJANGO_SETTINGS_MODULE=core.settings
+DB_NAME=meine_app
+DB_USER=meine_app
+DB_PASS=<generiertes-passwort>
+DB_HOST=127.0.0.1
+DB_PORT=5433
+DATABASE_URL="postgresql://meine_app:passwort@127.0.0.1:5433/meine_app"
+# + alle weiteren konfigurierten Vars
+```
+
+Die `.env` wird bei jedem Start aktualisiert – Änderungen im GUI sind sofort beim nächsten Start wirksam.
+
+### settings.py anpassen
+
+Die Django-`settings.py` muss die Variablen aus der `.env` einlesen. Empfohlen mit **python-decouple** oder **django-environ**:
+
+**Variante 1 – python-decouple** (`pip install python-decouple`):
+
+```python
+from decouple import config
+
+SECRET_KEY = config("SECRET_KEY", default="dev-only-insecure-key")
+DEBUG = config("DEBUG", default=True, cast=bool)
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost").split(",")
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME":     config("DB_NAME"),
+        "USER":     config("DB_USER"),
+        "PASSWORD": config("DB_PASS"),
+        "HOST":     config("DB_HOST", default="127.0.0.1"),
+        "PORT":     config("DB_PORT", default="5432"),
+    }
+}
+```
+
+**Variante 2 – os.environ** (ohne externe Abhängigkeit):
+
+```python
+import os
+
+SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-insecure-key")
+DEBUG = os.environ.get("DEBUG", "True") == "True"
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost").split(",")
+
+DATABASES = {
+    "default": {
+        "ENGINE":   "django.db.backends.postgresql",
+        "NAME":     os.environ.get("DB_NAME", "myapp"),
+        "USER":     os.environ.get("DB_USER", "myapp"),
+        "PASSWORD": os.environ.get("DB_PASS", ""),
+        "HOST":     os.environ.get("DB_HOST", "127.0.0.1"),
+        "PORT":     os.environ.get("DB_PORT", "5432"),
+    }
+}
+```
+
+> **Hinweis:** Die Variablen werden als Prozess-Umgebungsvariablen übergeben **und** als `.env`-Datei geschrieben. `os.environ` funktioniert direkt ohne weitere Pakete.
+
+### Nützliche Beispiele für "Weitere Vars"
+
+| Schlüssel | Beispielwert | Zweck |
+|---|---|---|
+| `EMAIL_HOST` | `smtp.gmail.com` | E-Mail-Server |
+| `EMAIL_PORT` | `587` | E-Mail-Port |
+| `EMAIL_HOST_USER` | `dein@email.de` | E-Mail-Login |
+| `EMAIL_HOST_PASSWORD` | `app-passwort` | E-Mail-Passwort |
+| `EMAIL_USE_TLS` | `True` | TLS aktivieren |
+| `CORS_ALLOW_ALL_ORIGINS` | `True` | CORS für API-Backends |
+| `STRIPE_SECRET_KEY` | `sk_test_...` | Zahlungsanbieter |
+| `AWS_ACCESS_KEY_ID` | `AKIA...` | AWS-Zugang |
+
+---
+
 ## App verwalten
 
 Jede App-Karte zeigt:
@@ -177,31 +270,7 @@ Das Tool übergibt den Schlüssel über `GIT_SSH_COMMAND` – die globale SSH-Ko
 
 Jede App bekommt eine eigene PostgreSQL-Datenbank auf dem **Port 5433** (Standard, anpassbar). Die Daten liegen unter `data\app_<id>\`.
 
-Das Tool setzt folgende Umgebungsvariablen für Django:
-
-```
-DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT
-DATABASE_URL  (postgresql://user:pass@127.0.0.1:5433/dbname)
-DEBUG=True
-```
-
-Die Django-`settings.py` muss diese Variablen auslesen, z. B. mit `python-decouple` oder `django-environ`:
-
-```python
-# settings.py (Beispiel)
-import os
-
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME":     os.environ.get("DB_NAME", "myapp"),
-        "USER":     os.environ.get("DB_USER", "myapp"),
-        "PASSWORD": os.environ.get("DB_PASS", ""),
-        "HOST":     os.environ.get("DB_HOST", "127.0.0.1"),
-        "PORT":     os.environ.get("DB_PORT", "5432"),
-    }
-}
-```
+Das Tool setzt beim Start alle nötigen Variablen – als Prozess-Umgebungsvariablen **und** als `.env`-Datei im Quellverzeichnis. Siehe Abschnitt [Umgebungsvariablen & .env-Datei](#umgebungsvariablen--env-datei) für Details und Konfigurationsbeispiele.
 
 ---
 

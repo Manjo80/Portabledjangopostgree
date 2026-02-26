@@ -10,6 +10,7 @@ Benötigt:  pip install customtkinter
 Paketieren: build_exe.bat  (erzeugt portable .exe via PyInstaller)
 """
 
+import json
 import secrets
 import string
 import threading
@@ -58,8 +59,8 @@ class AppDialog(ctk.CTkToplevel):
         self.result: dict | None = None
 
         self.title("App bearbeiten" if app else "Neue App hinzufügen")
-        self.geometry("560x660")
-        self.resizable(False, False)
+        self.geometry("580x940")
+        self.resizable(False, True)
         self.transient(parent)
         self.grab_set()
         self.lift()
@@ -208,6 +209,65 @@ class AppDialog(ctk.CTkToplevel):
         self.v_db_port = ctk.StringVar(value="5433")
         self._lbl_row(r, "DB-Port:", ctk.CTkEntry(self, textvariable=self.v_db_port, width=100)); r += 1
 
+        # ── Umgebungsvariablen ────────────────────────────────────────────
+        ctk.CTkFrame(self, height=1, fg_color="gray30").grid(
+            row=r, column=0, columnspan=3, sticky="ew", padx=20, pady=8
+        ); r += 1
+        ctk.CTkLabel(
+            self, text="Umgebungsvariablen", font=ctk.CTkFont(size=13, weight="bold")
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20); r += 1
+
+        # DJANGO_SETTINGS_MODULE
+        self.v_settings_module = ctk.StringVar(value="core.settings")
+        self._lbl_row(r, "Settings-Modul:", ctk.CTkEntry(
+            self, textvariable=self.v_settings_module,
+            placeholder_text="core.settings  (z.B. myapp.settings.local)",
+        )); r += 1
+
+        # ALLOWED_HOSTS
+        self.v_allowed_hosts = ctk.StringVar(value="localhost,127.0.0.1")
+        self._lbl_row(r, "Allowed Hosts:", ctk.CTkEntry(
+            self, textvariable=self.v_allowed_hosts,
+            placeholder_text="localhost,127.0.0.1,meinserver.local",
+        )); r += 1
+
+        # SECRET_KEY
+        self.v_secret_key = ctk.StringVar()
+        sk_frame = ctk.CTkFrame(self, fg_color="transparent")
+        sk_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkEntry(
+            sk_frame, textvariable=self.v_secret_key,
+            placeholder_text="Leer = Wert aus settings.py wird verwendet",
+        ).grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(
+            sk_frame, text="⟳", width=36,
+            command=lambda: self.v_secret_key.set(_random_password(50)),
+        ).grid(row=0, column=1, padx=(6, 0))
+        ctk.CTkLabel(self, text="SECRET_KEY:", anchor="w").grid(
+            row=r, column=0, sticky="w", **pad
+        )
+        sk_frame.grid(row=r, column=1, columnspan=2, sticky="ew", **pad); r += 1
+
+        # Weitere benutzerdefinierte Variablen
+        ctk.CTkLabel(self, text="Weitere Vars:", anchor="w").grid(
+            row=r, column=0, sticky="nw", **pad
+        )
+        self._extra_outer = ctk.CTkFrame(self, fg_color="transparent")
+        self._extra_outer.grid(row=r, column=1, columnspan=2, sticky="ew", **pad)
+        self._extra_outer.grid_columnconfigure(0, weight=1)
+        self._extra_rows: list[tuple] = []
+        self._extra_inner = ctk.CTkScrollableFrame(
+            self._extra_outer, height=95, fg_color=("gray85", "gray17"),
+        )
+        self._extra_inner.pack(fill="x")
+        self._extra_inner.grid_columnconfigure(1, weight=1)
+        ctk.CTkButton(
+            self._extra_outer, text="＋ Variable hinzufügen", height=26,
+            fg_color="gray40", hover_color="gray30",
+            command=self._add_extra_row,
+        ).pack(anchor="w", pady=(4, 0))
+        r += 1
+
         # Buttons
         btn = ctk.CTkFrame(self, fg_color="transparent")
         btn.grid(row=r, column=0, columnspan=3, pady=18)
@@ -279,6 +339,33 @@ class AppDialog(ctk.CTkToplevel):
         if not self.v_db_pass.get():
             self.v_db_pass.set(_random_password())
 
+    def _add_extra_row(self, key: str = "", value: str = ""):
+        """Fügt eine Zeile KEY=VALUE zur benutzerdefinierten Variablen-Tabelle hinzu."""
+        row_frame = ctk.CTkFrame(self._extra_inner, fg_color="transparent")
+        row_frame.pack(fill="x", padx=4, pady=2)
+        row_frame.grid_columnconfigure(1, weight=1)
+        k_var = ctk.StringVar(value=key)
+        v_var = ctk.StringVar(value=value)
+        ctk.CTkEntry(
+            row_frame, textvariable=k_var, width=130,
+            placeholder_text="SCHLÜSSEL",
+        ).grid(row=0, column=0, padx=(0, 4))
+        ctk.CTkEntry(
+            row_frame, textvariable=v_var,
+            placeholder_text="Wert",
+        ).grid(row=0, column=1, sticky="ew", padx=(0, 4))
+
+        def _remove(rf=row_frame):
+            self._extra_rows = [(k, v, f) for k, v, f in self._extra_rows if f is not rf]
+            rf.destroy()
+
+        ctk.CTkButton(
+            row_frame, text="−", width=28, height=28,
+            fg_color="gray30", hover_color="#c0392b",
+            command=_remove,
+        ).grid(row=0, column=2)
+        self._extra_rows.append((k_var, v_var, row_frame))
+
     # ── Befüllen bei Bearbeitung ──────────────────────────────────────────
 
     def _fill(self, app: dict):
@@ -300,6 +387,17 @@ class AppDialog(ctk.CTkToplevel):
             self.v_mode.set("📁  Lokaler Ordner")
             self._on_mode_change("📁  Lokaler Ordner")
             self.v_source.set(app.get("source_path", ""))
+
+        # Umgebungsvariablen befüllen
+        self.v_settings_module.set(app.get("settings_module", "core.settings"))
+        self.v_allowed_hosts.set(app.get("allowed_hosts", "localhost,127.0.0.1"))
+        self.v_secret_key.set(app.get("secret_key", ""))
+        try:
+            extra = json.loads(app.get("extra_env") or "{}")
+            for k, v in extra.items():
+                self._add_extra_row(k, str(v))
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     # ── Speichern ─────────────────────────────────────────────────────────
 
@@ -344,19 +442,30 @@ class AppDialog(ctk.CTkToplevel):
             source_path = source
             source_mode = "local"
 
+        # Extra-Variablen einlesen (leere Keys ignorieren)
+        extra = {
+            k.get().strip(): v.get()
+            for k, v, _ in self._extra_rows
+            if k.get().strip()
+        }
+
         sl = _slug(name)
         self.result = {
-            "name":         name,
-            "source_path":  source_path,
-            "port":         port,
-            "db_name":      self.v_db_name.get().strip() or sl,
-            "db_user":      self.v_db_user.get().strip() or sl,
-            "db_password":  self.v_db_pass.get() or _random_password(),
-            "db_port":      db_port,
-            "source_mode":  source_mode,
-            "repo_url":     repo_url,
-            "repo_branch":  branch,
-            "ssh_key_path": ssh_key,
+            "name":            name,
+            "source_path":     source_path,
+            "port":            port,
+            "db_name":         self.v_db_name.get().strip() or sl,
+            "db_user":         self.v_db_user.get().strip() or sl,
+            "db_password":     self.v_db_pass.get() or _random_password(),
+            "db_port":         db_port,
+            "source_mode":     source_mode,
+            "repo_url":        repo_url,
+            "repo_branch":     branch,
+            "ssh_key_path":    ssh_key,
+            "settings_module": self.v_settings_module.get().strip() or "core.settings",
+            "allowed_hosts":   self.v_allowed_hosts.get().strip() or "localhost,127.0.0.1",
+            "secret_key":      self.v_secret_key.get().strip(),
+            "extra_env":       json.dumps(extra),
         }
         self.destroy()
 

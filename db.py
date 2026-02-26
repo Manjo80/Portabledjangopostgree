@@ -45,6 +45,11 @@ class Database:
                     repo_url      TEXT    NOT NULL DEFAULT '',
                     repo_branch   TEXT    NOT NULL DEFAULT 'main',
                     ssh_key_path  TEXT    NOT NULL DEFAULT '',
+                    -- Umgebungsvariablen
+                    allowed_hosts   TEXT    NOT NULL DEFAULT 'localhost,127.0.0.1',
+                    settings_module TEXT    NOT NULL DEFAULT 'core.settings',
+                    secret_key      TEXT    NOT NULL DEFAULT '',
+                    extra_env       TEXT    NOT NULL DEFAULT '{}',
                     created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
                 );
 
@@ -58,10 +63,14 @@ class Database:
     def _migrate(self):
         """Fügt neue Spalten zu bestehenden Datenbanken hinzu (forward-only)."""
         new_cols = [
-            ("source_mode",  "TEXT NOT NULL DEFAULT 'local'"),
-            ("repo_url",     "TEXT NOT NULL DEFAULT ''"),
-            ("repo_branch",  "TEXT NOT NULL DEFAULT 'main'"),
-            ("ssh_key_path", "TEXT NOT NULL DEFAULT ''"),
+            ("source_mode",    "TEXT NOT NULL DEFAULT 'local'"),
+            ("repo_url",       "TEXT NOT NULL DEFAULT ''"),
+            ("repo_branch",    "TEXT NOT NULL DEFAULT 'main'"),
+            ("ssh_key_path",   "TEXT NOT NULL DEFAULT ''"),
+            ("allowed_hosts",  "TEXT NOT NULL DEFAULT 'localhost,127.0.0.1'"),
+            ("settings_module","TEXT NOT NULL DEFAULT 'core.settings'"),
+            ("secret_key",     "TEXT NOT NULL DEFAULT ''"),
+            ("extra_env",      "TEXT NOT NULL DEFAULT '{}'"),
         ]
         with self._lock, self._connect() as conn:
             for col, defn in new_cols:
@@ -99,17 +108,23 @@ class Database:
         repo_url: str = "",
         repo_branch: str = "main",
         ssh_key_path: str = "",
+        allowed_hosts: str = "localhost,127.0.0.1",
+        settings_module: str = "core.settings",
+        secret_key: str = "",
+        extra_env: str = "{}",
     ) -> int:
         with self._lock, self._connect() as conn:
             conn.execute(
                 """INSERT INTO apps
                    (name, source_path, port, db_name, db_user, db_password,
                     db_port, python_version,
-                    source_mode, repo_url, repo_branch, ssh_key_path)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    source_mode, repo_url, repo_branch, ssh_key_path,
+                    allowed_hosts, settings_module, secret_key, extra_env)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, source_path, port, db_name, db_user, db_password,
                  db_port, python_version,
-                 source_mode, repo_url, repo_branch, ssh_key_path),
+                 source_mode, repo_url, repo_branch, ssh_key_path,
+                 allowed_hosts, settings_module, secret_key, extra_env),
             )
             conn.commit()
             return conn.execute("SELECT last_insert_rowid()").fetchone()[0]

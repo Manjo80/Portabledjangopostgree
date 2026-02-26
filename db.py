@@ -4,10 +4,16 @@ Speichert alle konfigurierten Web-Apps und globale Einstellungen.
 """
 
 import sqlite3
+import sys
 import threading
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "apps.db"
+# Neben der .exe speichern (portabler Ordner), nicht im PyInstaller-Temp-Ordner
+DB_PATH = (
+    Path(sys.executable).parent / "apps.db"
+    if getattr(sys, "frozen", False)
+    else Path(__file__).parent / "apps.db"
+)
 
 
 class Database:

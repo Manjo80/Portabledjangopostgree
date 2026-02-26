@@ -321,6 +321,13 @@ class AppRunner:
         return True
 
     def _start_postgres(self, wait: bool = False) -> bool:
+        # Wenn PostgreSQL bereits läuft, nichts tun
+        if self._is_postgres_running():
+            self.log(f"  [{self.app['name']}] PostgreSQL läuft bereits (Port {self.app['db_port']}).")
+            if wait:
+                time.sleep(1)
+            return True
+
         self.log(
             f"  [{self.app['name']}] Starte PostgreSQL "
             f"(Port {self.app['db_port']}) …"
@@ -550,6 +557,11 @@ class AppRunner:
             env.update({k: str(v) for k, v in extra.items() if k})
         except (json.JSONDecodeError, TypeError):
             pass
+        # PYTHONPATH: source_path einbinden damit Django-Module gefunden werden
+        # (Embedded Python fügt cwd nicht automatisch zu sys.path hinzu)
+        src_path = str(Path(self.app["source_path"]))
+        existing_pp = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (src_path + os.pathsep + existing_pp).rstrip(os.pathsep)
         # Portable Python/PostgreSQL lib-Verzeichnis einbinden
         pg_lib = self.postgres_dir / "lib"
         if pg_lib.exists():

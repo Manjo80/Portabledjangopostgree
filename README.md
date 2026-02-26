@@ -385,6 +385,24 @@ Mit `[A] Yes to All` bestätigen. Danach `Unblock-File` wie oben ausführen.
 
 ---
 
+### „pyinstaller is not recognized"
+
+**Fehlermeldung:**
+```
+'pyinstaller' is not recognized as an internal or external command
+```
+
+**Ursache:** Python installiert ausführbare Skripte in `%AppData%\Python\PythonXYZ\Scripts`, dieses Verzeichnis ist aber nicht im PATH.
+
+**Lösung:** `build_exe.bat` ruft seit v1.1 automatisch `python -m PyInstaller` — PATH-Problem tritt nicht mehr auf.
+Falls du den Befehl manuell ausführst, nutze ebenfalls die Modulvariante:
+
+```cmd
+python -m PyInstaller --onefile --windowed --name PortableDjangoManager main.py
+```
+
+---
+
 ### ssh-keygen nicht gefunden
 
 Der SSH-Key-Manager im Tool ruft `ssh-keygen` auf. Dieses ist seit Windows 10 (Version 1809) als optionales Feature enthalten.

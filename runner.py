@@ -6,6 +6,7 @@ einen Django-Entwicklungsserver.
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 
@@ -209,6 +210,10 @@ class AppRunner:
 
     def _setup(self) -> bool:
         """initdb + Datenbank anlegen + Django-Migrationen."""
+        # Unvollständiges Setup aus früherem fehlgeschlagenen Versuch aufräumen
+        if self.data_dir.exists() and any(self.data_dir.iterdir()):
+            self.log(f"  [{self.app['name']}] Räume unvollständiges Daten-Verzeichnis auf …")
+            shutil.rmtree(self.data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 

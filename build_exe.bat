@@ -31,10 +31,11 @@ echo  [2/3] Erstelle EXE mit PyInstaller...
 pyinstaller ^
     --onefile ^
     --windowed ^
-    --name "PortableDjangoTester" ^
+    --name "PortableDjangoManager" ^
     --icon NONE ^
     --add-data "db.py;." ^
     --add-data "runner.py;." ^
+    --add-data "git_manager.py;." ^
     --hidden-import customtkinter ^
     --hidden-import tkinter ^
     --hidden-import sqlite3 ^
@@ -49,11 +50,11 @@ if %ERRORLEVEL% neq 0 (
 echo  [OK] EXE erstellt.
 
 echo  [3/3] Kopiere EXE in dist-Verzeichnis...
-if exist dist\PortableDjangoTester.exe (
+if exist dist\PortableDjangoManager.exe (
     echo.
     echo  ============================================================
     echo  Fertig!
-    echo  EXE: dist\PortableDjangoTester.exe
+    echo  EXE: dist\PortableDjangoManager.exe
     echo.
     echo  Die EXE kann zusammen mit den Ordnern
     echo    python\     (eingebettetes Python)

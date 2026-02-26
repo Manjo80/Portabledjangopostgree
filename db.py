@@ -15,6 +15,7 @@ class Database:
         self.db_path = db_path or DB_PATH
         self._lock = threading.Lock()
         self._init()
+        self._migrate()
 
     # ─── Interne Hilfsmethoden ─────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ class Database:
         return conn
 
     def _init(self):
+        """Erstellt die Tabellen beim ersten Start."""
         with self._lock, self._connect() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS apps (
@@ -38,6 +40,11 @@ class Database:
                     db_port       INTEGER NOT NULL DEFAULT 5433,
                     python_version TEXT   NOT NULL DEFAULT '3.12.8',
                     setup_done    INTEGER NOT NULL DEFAULT 0,
+                    -- Git / GitHub
+                    source_mode   TEXT    NOT NULL DEFAULT 'local',
+                    repo_url      TEXT    NOT NULL DEFAULT '',
+                    repo_branch   TEXT    NOT NULL DEFAULT 'main',
+                    ssh_key_path  TEXT    NOT NULL DEFAULT '',
                     created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
                 );
 
@@ -47,6 +54,22 @@ class Database:
                 );
             """)
             conn.commit()
+
+    def _migrate(self):
+        """Fügt neue Spalten zu bestehenden Datenbanken hinzu (forward-only)."""
+        new_cols = [
+            ("source_mode",  "TEXT NOT NULL DEFAULT 'local'"),
+            ("repo_url",     "TEXT NOT NULL DEFAULT ''"),
+            ("repo_branch",  "TEXT NOT NULL DEFAULT 'main'"),
+            ("ssh_key_path", "TEXT NOT NULL DEFAULT ''"),
+        ]
+        with self._lock, self._connect() as conn:
+            for col, defn in new_cols:
+                try:
+                    conn.execute(f"ALTER TABLE apps ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    pass  # Spalte existiert bereits
 
     # ─── App-CRUD ──────────────────────────────────────────────────────────
 
@@ -72,15 +95,21 @@ class Database:
         db_password: str,
         db_port: int = 5433,
         python_version: str = "3.12.8",
+        source_mode: str = "local",
+        repo_url: str = "",
+        repo_branch: str = "main",
+        ssh_key_path: str = "",
     ) -> int:
         with self._lock, self._connect() as conn:
             conn.execute(
                 """INSERT INTO apps
                    (name, source_path, port, db_name, db_user, db_password,
-                    db_port, python_version)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (name, source_path, port, db_name, db_user,
-                 db_password, db_port, python_version),
+                    db_port, python_version,
+                    source_mode, repo_url, repo_branch, ssh_key_path)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (name, source_path, port, db_name, db_user, db_password,
+                 db_port, python_version,
+                 source_mode, repo_url, repo_branch, ssh_key_path),
             )
             conn.commit()
             return conn.execute("SELECT last_insert_rowid()").fetchone()[0]

@@ -239,6 +239,48 @@ class AppRunner:
             capture_output=True,
         )
 
+    # ─── Migrationen (öffentlich, für Update-Workflow) ────────────────────
+
+    def _run_migrations(self) -> bool:
+        """
+        Führt Django-Migrationen aus ohne den Server zu starten.
+        PostgreSQL muss bereits laufen (wird kurz gestartet und gestoppt).
+        """
+        pg_was_running = self._is_postgres_running()
+        if not pg_was_running and not self._start_postgres(wait=True):
+            return False
+
+        env = self._build_env()
+        r = subprocess.run(
+            [str(self._py), "manage.py", "migrate", "--noinput"],
+            cwd=self.app["source_path"],
+            env=env,
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            self.log(f"  Migrations-Fehler: {r.stderr}")
+        else:
+            self.log(f"  [{self.app['name']}] Migrationen OK.")
+
+        subprocess.run(
+            [str(self._py), "manage.py", "collectstatic", "--noinput"],
+            cwd=self.app["source_path"],
+            env=env,
+            capture_output=True,
+        )
+
+        if not pg_was_running:
+            self._stop_postgres()
+
+        return r.returncode == 0
+
+    def _is_postgres_running(self) -> bool:
+        r = subprocess.run(
+            [str(self._pg_ctl), "status", "-D", str(self.data_dir)],
+            capture_output=True,
+        )
+        return r.returncode == 0
+
     # ─── Django ────────────────────────────────────────────────────────────
 
     def _start_django(self) -> bool:

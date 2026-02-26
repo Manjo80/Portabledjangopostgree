@@ -6,6 +6,7 @@ einen Django-Entwicklungsserver.
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 
@@ -34,7 +35,9 @@ class AppRunner:
                  log_callback=None):
         self.app = app
         self.base_dir = Path(base_dir or BASE_DIR)
-        self.log = log_callback or print
+        self._ui_log = log_callback or print
+        self._log_file: "IO | None" = None
+        self.log = self._log_both
 
         self._pg_proc: subprocess.Popen | None = None
         self._dj_proc: subprocess.Popen | None = None
@@ -46,6 +49,7 @@ class AppRunner:
         self.postgres_dir = self.base_dir / "postgres"
         self.data_dir    = self.base_dir / "data" / f"app_{app['id']}"
         self.log_dir     = self.base_dir / "logs"
+        self.cache_dir   = self.base_dir / "cache"
 
         # Executables (Windows vs. Linux für Entwicklung)
         if sys.platform == "win32":
@@ -61,6 +65,28 @@ class AppRunner:
         self._pg_ctl    = self._pg_bin / ("pg_ctl.exe"    if sys.platform == "win32" else "pg_ctl")
         self._psql      = self._pg_bin / ("psql.exe"      if sys.platform == "win32" else "psql")
         self._pg_isready= self._pg_bin / ("pg_isready.exe"if sys.platform == "win32" else "pg_isready")
+
+        # Log-Datei öffnen (app_N.log in logs/)
+        self._open_log_file()
+
+    def _open_log_file(self):
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = self.log_dir / f"app_{self.app['id']}.log"
+            self._log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+        except Exception:
+            self._log_file = None
+
+    def _log_both(self, msg: str):
+        """Schreibt in die UI-Callback UND in die Log-Datei."""
+        self._ui_log(msg)
+        if self._log_file:
+            import datetime
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                self._log_file.write(f"[{ts}] {msg}\n")
+            except Exception:
+                pass
 
     # ─── Public API ────────────────────────────────────────────────────────
 
@@ -209,6 +235,10 @@ class AppRunner:
 
     def _setup(self) -> bool:
         """initdb + Datenbank anlegen + Django-Migrationen."""
+        # Unvollständiges Setup aus früherem fehlgeschlagenen Versuch aufräumen
+        if self.data_dir.exists() and any(self.data_dir.iterdir()):
+            self.log(f"  [{self.app['name']}] Räume unvollständiges Daten-Verzeichnis auf …")
+            shutil.rmtree(self.data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -220,7 +250,14 @@ class AppRunner:
             env=self._pg_env(), creationflags=_NO_WIN,
         )
         if r.returncode != 0:
-            self.log(f"  initdb-Fehler: {r.stderr}")
+            stdout = r.stdout.strip()[-800:] if r.stdout.strip() else ""
+            stderr = r.stderr.strip()[-800:] if r.stderr.strip() else ""
+            self.log(f"  initdb FEHLER (returncode={r.returncode})")
+            if stderr:
+                self.log(f"  initdb stderr: {stderr}")
+            if stdout:
+                self.log(f"  initdb stdout: {stdout}")
+            self.log(f"  data_dir: {self.data_dir}  (existiert: {self.data_dir.exists()})")
             return False
 
         # Minimal-Konfiguration anhängen
@@ -256,7 +293,8 @@ class AppRunner:
             capture_output=True, text=True,
         )
         if r.returncode != 0:
-            self.log(f"  Migrations-Fehler: {r.stderr}")
+            out = (r.stderr or r.stdout).strip()[-1000:]
+            self.log(f"  Migrations-Fehler (returncode={r.returncode}): {out}")
             self._stop_postgres()
             return False
 
@@ -329,8 +367,9 @@ class AppRunner:
         if not req_file.exists():
             return True
 
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        marker = self.data_dir / ".pip_done"
+        # Marker in cache_dir (NICHT in data_dir – data_dir wird von PostgreSQL benutzt!)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        marker = self.cache_dir / f"app_{self.app['id']}_pip.done"
         try:
             if marker.exists() and marker.stat().st_mtime >= req_file.stat().st_mtime:
                 return True  # Bereits installiert und aktuell
@@ -375,7 +414,8 @@ class AppRunner:
             capture_output=True, text=True,
         )
         if r.returncode != 0:
-            self.log(f"  Migrations-Fehler: {r.stderr}")
+            out = (r.stderr or r.stdout).strip()[-1000:]
+            self.log(f"  Migrations-Fehler (returncode={r.returncode}): {out}")
         else:
             self.log(f"  [{self.app['name']}] Migrationen OK.")
 

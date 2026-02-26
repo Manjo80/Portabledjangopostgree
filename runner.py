@@ -47,7 +47,9 @@ class AppRunner:
         # Executables (Windows vs. Linux für Entwicklung)
         if sys.platform == "win32":
             self._py      = self.python_dir / "python.exe"
-            self._pg_bin  = self.postgres_dir / "bin"
+            # Manche PostgreSQL-Setups legen EXEs in bin\, andere direkt ins Root
+            bin_sub = self.postgres_dir / "bin"
+            self._pg_bin  = bin_sub if bin_sub.is_dir() else self.postgres_dir
         else:
             self._py      = Path(sys.executable)
             self._pg_bin  = Path("/usr/bin")

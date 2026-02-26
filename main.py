@@ -34,6 +34,34 @@ REPOS_DIR = BASE_DIR / "repos"
 
 # ─── Hilfsfunktionen ─────────────────────────────────────────────────────────
 
+def _detect_settings_module(project_dir: Path) -> str | None:
+    """
+    Sucht in project_dir nach einer settings.py und gibt den Python-Modulpfad
+    zurück (z.B. 'myapp.settings'). Gibt None zurück wenn nichts gefunden.
+    """
+    if not project_dir.is_dir() or not (project_dir / "manage.py").exists():
+        return None
+    _SKIP = {"venv", "env", ".venv", ".env", "__pycache__", ".git",
+             "node_modules", "site-packages", "dist-packages"}
+    found: list[Path] = []
+    try:
+        for p in project_dir.rglob("settings.py"):
+            parts = set(p.relative_to(project_dir).parts[:-1])
+            if parts & _SKIP:
+                continue
+            found.append(p)
+    except (OSError, ValueError):
+        return None
+    if not found:
+        return None
+    target = next(
+        (f for f in found
+         if not any(s in f.parent.name for s in ("dev", "prod", "local", "test"))),
+        found[0],
+    )
+    return ".".join(target.relative_to(project_dir).with_suffix("").parts)
+
+
 def _random_password(length: int = 20) -> str:
     chars = string.ascii_letters + string.digits
     return "".join(secrets.choice(chars) for _ in range(length))
@@ -316,6 +344,13 @@ class AppDialog(ctk.CTkToplevel):
             return
         self.v_source.set(path)
         self._autofill_from_name(Path(path).name)
+        self._autodetect_settings(Path(path))
+
+    def _autodetect_settings(self, project_dir: Path):
+        """Erkennt automatisch das Django-Settings-Modul und trägt es ein."""
+        module = _detect_settings_module(project_dir)
+        if module and self.v_settings_module.get() in ("", "core.settings"):
+            self.v_settings_module.set(module)
 
     def _browse_ssh_key(self):
         path = filedialog.askopenfilename(
@@ -711,6 +746,12 @@ class PortableDjangoManager(ctk.CTk):
                     parent=self,
                 )
                 return
+            # Settings-Modul aus geklontem Repo erkennen (falls noch Standard)
+            if result.get("settings_module") in ("", "core.settings"):
+                detected = _detect_settings_module(Path(result["source_path"]))
+                if detected:
+                    result["settings_module"] = detected
+                    self._log(f"  Settings-Modul erkannt: {detected}")
 
         self.db.add_app(**result)
         self._log(f"App '{result['name']}' hinzugefügt.")

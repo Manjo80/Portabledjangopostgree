@@ -18,6 +18,14 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
+:: Python Scripts-Ordner dynamisch zum PATH hinzufuegen
+:: (loest "pyinstaller is not recognized" bei User-Installationen)
+for /f "usebackq tokens=*" %%i in (
+    `python -c "import sys,os;print(os.path.join(os.path.dirname(sys.executable),'Scripts'))"`
+) do set PY_SCRIPTS=%%i
+set PATH=%PY_SCRIPTS%;%PATH%
+echo  [INFO] Python Scripts: %PY_SCRIPTS%
+
 echo  [1/3] Installiere Abhaengigkeiten...
 python -m pip install -r requirements.txt -q
 if %ERRORLEVEL% neq 0 (

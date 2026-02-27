@@ -520,6 +520,33 @@ class AppRunner:
             capture_output=True,
         )
 
+        # Superuser automatisch anlegen
+        su_user = self.app.get("su_username", "").strip()
+        su_pass = self.app.get("su_password", "").strip()
+        if su_user and su_pass:
+            self.log(f"  [{self.app['name']}] Lege Superuser '{su_user}' an …")
+            su_env = env.copy()
+            su_env["DJANGO_SUPERUSER_PASSWORD"] = su_pass
+            su_email = self.app.get("su_email", "admin@example.com").strip()
+            r_su = subprocess.run(
+                [str(self._py), "manage.py", "createsuperuser",
+                 "--noinput",
+                 f"--username={su_user}",
+                 f"--email={su_email}"],
+                cwd=self.app["source_path"],
+                env=su_env,
+                capture_output=True, text=True,
+            )
+            if r_su.returncode == 0:
+                self.log(f"  [{self.app['name']}] Superuser '{su_user}' erstellt.")
+            else:
+                err = (r_su.stderr or r_su.stdout).strip()
+                # "already exists" ist kein Fehler
+                if "already exists" in err.lower():
+                    self.log(f"  [{self.app['name']}] Superuser '{su_user}' existiert bereits.")
+                else:
+                    self.log(f"  [{self.app['name']}] Superuser-Warnung: {err[-300:]}")
+
         self.log(f"  [{self.app['name']}] Ersteinrichtung abgeschlossen.")
         return True
 

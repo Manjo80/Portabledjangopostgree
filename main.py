@@ -560,6 +560,79 @@ class AppDialog(ctk.CTkToplevel):
             text_color="gray55", font=ctk.CTkFont(size=11),
         ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20, pady=(0, 4)); r += 1
 
+        # ── nginx Reverse-Proxy ────────────────────────────────────────────
+        ctk.CTkFrame(cf, height=1, fg_color="gray30").grid(
+            row=r, column=0, columnspan=3, sticky="ew", padx=20, pady=8
+        ); r += 1
+        ctk.CTkLabel(
+            cf, text="nginx  (optionaler Reverse-Proxy)",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20); r += 1
+
+        ctk.CTkLabel(
+            cf,
+            text=(
+                "nginx sitzt vor Django und liefert statische Dateien\n"
+                "(static/, media/) direkt aus – schneller und produktionsreif.\n"
+                "nginx.exe wird beim ersten Start automatisch heruntergeladen."
+            ),
+            text_color="gray55", font=ctk.CTkFont(size=11),
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20, pady=(0, 4)); r += 1
+
+        # nginx aktivieren (Toggle)
+        ctk.CTkLabel(cf, text="nginx aktivieren:", anchor="w").grid(
+            row=r, column=0, sticky="w", padx=20, pady=5
+        )
+        self.v_nginx_enabled = ctk.BooleanVar(value=False)
+        nginx_toggle_frame = ctk.CTkFrame(cf, fg_color="transparent")
+        nginx_toggle_frame.grid(row=r, column=1, columnspan=2, sticky="w", padx=20, pady=5)
+        ctk.CTkSwitch(
+            nginx_toggle_frame,
+            text="",
+            variable=self.v_nginx_enabled,
+            onvalue=True, offvalue=False,
+            command=self._on_nginx_toggle,
+        ).pack(side="left")
+        self._nginx_status_lbl = ctk.CTkLabel(
+            nginx_toggle_frame,
+            text="  Deaktiviert – Django-Runserver dient direkt",
+            text_color="gray55", font=ctk.CTkFont(size=11),
+        )
+        self._nginx_status_lbl.pack(side="left")
+        r += 1
+
+        # nginx-Port
+        ctk.CTkLabel(cf, text="nginx-Port:", anchor="w").grid(
+            row=r, column=0, sticky="w", padx=20, pady=5
+        )
+        nginx_port_frame = ctk.CTkFrame(cf, fg_color="transparent")
+        nginx_port_frame.grid(row=r, column=1, columnspan=2, sticky="w", padx=20, pady=5)
+        self.v_nginx_port = ctk.StringVar(value="80")
+        ctk.CTkEntry(nginx_port_frame, textvariable=self.v_nginx_port, width=90).pack(side="left")
+        ctk.CTkLabel(
+            nginx_port_frame,
+            text="  (Außen-Port; Django läuft intern auf dem App-Port)",
+            text_color="gray55", font=ctk.CTkFont(size=11),
+        ).pack(side="left")
+        self._nginx_port_row = r
+        r += 1
+
+        # nginx Download-Hinweis
+        self._nginx_hint = ctk.CTkLabel(
+            cf,
+            text=(
+                "📥  nginx.exe wird automatisch beim ersten Start heruntergeladen\n"
+                "     oder manuell unter  <Tool-Ordner>/nginx/nginx-{ver}/nginx.exe  ablegen.\n"
+                "     Statische Dateien werden dann OHNE --insecure von nginx geliefert."
+            ).replace("{ver}", "1.26.3"),
+            text_color="#3498db",
+            font=ctk.CTkFont(size=11),
+            justify="left",
+        )
+        self._nginx_hint.grid(row=r, column=0, columnspan=3, sticky="w", padx=20, pady=(0, 4))
+        r += 1
+        self._nginx_hint_row = r - 1
+
         # ── Umgebungsvariablen ────────────────────────────────────────────
         ctk.CTkFrame(cf, height=1, fg_color="gray30").grid(
             row=r, column=0, columnspan=3, sticky="ew", padx=20, pady=8
@@ -781,6 +854,19 @@ class AppDialog(ctk.CTkToplevel):
         self._ssh_status_lbl.configure(
             text=msg, text_color=colors.get(color, color))
 
+    def _on_nginx_toggle(self):
+        enabled = self.v_nginx_enabled.get()
+        if enabled:
+            self._nginx_status_lbl.configure(
+                text="  Aktiv – nginx liefert static/media/, proxied Django",
+                text_color="#2ecc71",
+            )
+        else:
+            self._nginx_status_lbl.configure(
+                text="  Deaktiviert – Django-Runserver dient direkt",
+                text_color="gray55",
+            )
+
     def _on_name_change(self):
         """Aktualisiert DB-Felder wenn der App-Name geändert wird."""
         name = self.v_name.get().strip()
@@ -854,6 +940,12 @@ class AppDialog(ctk.CTkToplevel):
         self.v_su_email.set(app.get("su_email", "admin@example.com"))
         self.v_su_pass.set(app.get("su_password", ""))
 
+        # nginx-Felder befüllen
+        nginx_on = bool(app.get("nginx_enabled", 0))
+        self.v_nginx_enabled.set(nginx_on)
+        self.v_nginx_port.set(str(app.get("nginx_port", 80)))
+        self._on_nginx_toggle()
+
         # Umgebungsvariablen befüllen
         self.v_settings_module.set(app.get("settings_module", "core.settings"))
         self.v_allowed_hosts.set(app.get("allowed_hosts", "localhost,127.0.0.1"))
@@ -923,6 +1015,11 @@ class AppDialog(ctk.CTkToplevel):
             return
 
         sl = _slug(name)
+        try:
+            nginx_port = int(self.v_nginx_port.get() or "80")
+        except ValueError:
+            nginx_port = 80
+
         self.result = {
             "name":            name,
             "source_path":     source_path,
@@ -942,6 +1039,8 @@ class AppDialog(ctk.CTkToplevel):
             "su_username":     su_user,
             "su_email":        self.v_su_email.get().strip() or "admin@example.com",
             "su_password":     su_pass,
+            "nginx_enabled":   int(self.v_nginx_enabled.get()),
+            "nginx_port":      nginx_port,
         }
         self.destroy()
 
@@ -1203,14 +1302,20 @@ class PortableDjangoManager(ctk.CTk):
             ).pack(side="left")
 
         # Detailzeile
+        nginx_on   = bool(app.get("nginx_enabled", 0))
+        nginx_port = app.get("nginx_port", 80)
+        port_info  = (
+            f"nginx :{nginx_port} → Django :{app['port']}"
+            if nginx_on else f"Port {app['port']}"
+        )
         if is_github:
             url   = app.get("repo_url", "")
             short = url.replace("https://github.com/", "").replace("git@github.com:", "")
             branch = app.get("repo_branch", "main")
-            detail = f"⎇ {branch}  ·  {short}  ·  Port {app['port']}  ·  DB: {app['db_name']}"
+            detail = f"⎇ {branch}  ·  {short}  ·  {port_info}  ·  DB: {app['db_name']}"
         else:
             detail = (
-                f"📁 {app['source_path']}  ·  Port {app['port']}  ·  DB: {app['db_name']}"
+                f"📁 {app['source_path']}  ·  {port_info}  ·  DB: {app['db_name']}"
             )
         ctk.CTkLabel(
             info, text=detail, text_color="gray55",
@@ -1459,7 +1564,11 @@ class PortableDjangoManager(ctk.CTk):
         self._log("🔄 Starte Datenbankserver neu …")
 
     def _open_browser(self, app: dict):
-        webbrowser.open(f"http://localhost:{app['port']}")
+        if app.get("nginx_enabled"):
+            port = app.get("nginx_port", 80)
+        else:
+            port = app["port"]
+        webbrowser.open(f"http://localhost:{port}")
 
     def _show_about(self):
         AboutDialog(self)

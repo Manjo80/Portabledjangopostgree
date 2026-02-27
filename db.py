@@ -85,6 +85,9 @@ class Database:
             ("su_username",    "TEXT NOT NULL DEFAULT 'admin'"),
             ("su_email",       "TEXT NOT NULL DEFAULT 'admin@example.com'"),
             ("su_password",    "TEXT NOT NULL DEFAULT ''"),
+            # nginx Reverse-Proxy (optional)
+            ("nginx_enabled",  "INTEGER NOT NULL DEFAULT 0"),
+            ("nginx_port",     "INTEGER NOT NULL DEFAULT 80"),
         ]
         with self._lock, self._connect() as conn:
             for col, defn in new_cols:
@@ -129,6 +132,8 @@ class Database:
         su_username: str = "admin",
         su_email: str = "admin@example.com",
         su_password: str = "",
+        nginx_enabled: int = 0,
+        nginx_port: int = 80,
     ) -> int:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -137,13 +142,15 @@ class Database:
                     db_port, python_version,
                     source_mode, repo_url, repo_branch, ssh_key_path,
                     allowed_hosts, settings_module, secret_key, extra_env,
-                    su_username, su_email, su_password)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    su_username, su_email, su_password,
+                    nginx_enabled, nginx_port)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, source_path, port, db_name, db_user, db_password,
                  db_port, python_version,
                  source_mode, repo_url, repo_branch, ssh_key_path,
                  allowed_hosts, settings_module, secret_key, extra_env,
-                 su_username, su_email, su_password),
+                 su_username, su_email, su_password,
+                 nginx_enabled, nginx_port),
             )
             conn.commit()
             return conn.execute("SELECT last_insert_rowid()").fetchone()[0]

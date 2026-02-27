@@ -17,6 +17,8 @@ import threading
 import time
 from pathlib import Path
 
+from nginx_manager import NginxManager
+
 # Wenn als PyInstaller-.exe gefroren: BASE_DIR = Ordner der .exe (portabler Ordner)
 # Im Entwicklungs-Modus:             BASE_DIR = Ordner dieser Datei
 BASE_DIR = (
@@ -304,6 +306,13 @@ class AppRunner:
         self._running = False
         self._lock = threading.Lock()
 
+        # nginx Reverse-Proxy (optional, nur wenn nginx_enabled=1 in App-Config)
+        self._nginx: NginxManager | None = (
+            NginxManager(self.base_dir, app, log_callback=self.log)
+            if app.get("nginx_enabled")
+            else None
+        )
+
         # Verzeichnisse
         self.python_dir = self.base_dir / "python"
         self.log_dir    = self.base_dir / "logs"
@@ -355,7 +364,7 @@ class AppRunner:
         return t
 
     def stop(self):
-        """Stoppt den Django-Prozess. PostgreSQL läuft weiter (vom SharedPostgresServer verwaltet)."""
+        """Stoppt Django und (falls aktiv) nginx."""
         with self._lock:
             self._running = False
             if self._dj_proc and self._dj_proc.poll() is None:
@@ -365,6 +374,8 @@ class AppRunner:
                 except subprocess.TimeoutExpired:
                     self._dj_proc.kill()
             self._dj_proc = None
+        if self._nginx and self._nginx.is_running():
+            self._nginx.stop()
         self.log(f"[{self.app['name']}] Gestoppt.")
 
     # ─── Interner Ablauf ───────────────────────────────────────────────────
@@ -690,6 +701,37 @@ class AppRunner:
                 self.log(f"  [{self.app['name']}] {line}")
         if r.returncode != 0:
             self.log(f"  [{self.app['name']}] collectstatic Warnung (returncode={r.returncode})")
+        # Extra-Dateien aus _portable_static/ in STATIC_ROOT einspielen
+        self._apply_portable_static(env)
+
+    def _apply_portable_static(self, env: dict) -> None:
+        """
+        Kopiert Dateien aus <source_path>/_portable_static/ nach <source_path>/staticfiles/.
+        Damit können Dateien (z.B. logo.png), die nicht im Git-Repo sind,
+        persistent bereitgestellt werden – einfach einmalig dort ablegen.
+
+        Beispiel:
+            <source_path>/_portable_static/img/logo.png
+            → <source_path>/staticfiles/img/logo.png
+        """
+        import shutil
+        source_path = Path(self.app["source_path"])
+        src = source_path / "_portable_static"
+        if not src.is_dir():
+            return
+        # Standard STATIC_ROOT = <source_path>/staticfiles  (Django-Konvention)
+        dst = source_path / "staticfiles"
+        dst.mkdir(parents=True, exist_ok=True)
+        copied = 0
+        for file in src.rglob("*"):
+            if file.is_file():
+                rel = file.relative_to(src)
+                target = dst / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(file), str(target))
+                copied += 1
+        if copied:
+            self.log(f"  [{self.app['name']}] _portable_static: {copied} Datei(en) nach staticfiles/ kopiert.")
 
     def _start_django(self) -> bool:
         self.log(f"  [{self.app['name']}] Starte Django (Port {self.app['port']}) …")
@@ -698,11 +740,18 @@ class AppRunner:
         # Statische Dateien vor jedem Start sammeln (nicht nur beim Erstsetup),
         # damit manuell hinzugefügte Dateien (z.B. Logo) immer aktuell sind.
         self._run_collectstatic(env)
+
+        # Mit nginx: kein --insecure nötig (nginx liefert static/media/ direkt)
+        # Ohne nginx: --insecure damit Django static-Dateien mit DEBUG=False selbst ausliefert
+        use_nginx = self._nginx is not None
+        cmd = [str(self._py), "manage.py", "runserver"]
+        if not use_nginx:
+            cmd.append("--insecure")
+        cmd.append(f"0.0.0.0:{self.app['port']}")
+
         with self._lock:
             self._dj_proc = subprocess.Popen(
-                [str(self._py), "manage.py", "runserver",
-                 "--insecure",          # statische Dateien aus STATIC_ROOT auch mit DEBUG=False
-                 f"0.0.0.0:{self.app['port']}"],
+                cmd,
                 cwd=self.app["source_path"],
                 env=env,
                 stdout=subprocess.PIPE,
@@ -712,7 +761,14 @@ class AppRunner:
         threading.Thread(target=self._pipe_output, daemon=True).start()
         time.sleep(2)
         with self._lock:
-            return self._dj_proc.poll() is None
+            if self._dj_proc.poll() is not None:
+                return False
+
+        # nginx nach Django starten (damit der Proxy-Backend schon bereit ist)
+        if self._nginx:
+            self._nginx.start()
+
+        return True
 
     def _pipe_output(self):
         if self._dj_proc and self._dj_proc.stdout:

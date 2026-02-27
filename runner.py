@@ -693,6 +693,7 @@ class AppRunner:
         with self._lock:
             self._dj_proc = subprocess.Popen(
                 [str(self._py), "manage.py", "runserver",
+                 "--insecure",          # statische Dateien aus STATIC_ROOT auch mit DEBUG=False
                  f"0.0.0.0:{self.app['port']}"],
                 cwd=self.app["source_path"],
                 env=env,
@@ -716,14 +717,21 @@ class AppRunner:
         env = os.environ.copy()
         # Shared PostgreSQL-Port verwenden (nicht den veralteten per-app db_port)
         pg_port = str(self.pg.port)
+        port = str(self.app.get("port", "8000"))
         env.update({
             "DB_NAME":   self.app["db_name"],
             "DB_USER":   self.app["db_user"],
             "DB_PASS":   self.app["db_password"],
             "DB_HOST":   "127.0.0.1",
             "DB_PORT":   pg_port,
-            "DEBUG":     "True",
+            # DEBUG=False + --insecure: Django bedient statische Dateien aus
+            # STATIC_ROOT (staticfiles/), genauso wie nginx in Produktion.
+            # Mit DEBUG=True würden Finders genutzt (app/static/ + STATICFILES_DIRS),
+            # aber STATIC_ROOT wird dabei NICHT durchsucht → Logo 404.
+            "DEBUG":     "False",
             "ALLOWED_HOSTS": self.app.get("allowed_hosts", "localhost,127.0.0.1"),
+            # CSRF_TRUSTED_ORIGINS für lokalen HTTP-Zugriff (nötig wenn DEBUG=False)
+            "CSRF_TRUSTED_ORIGINS": f"http://localhost:{port},http://127.0.0.1:{port}",
             "DJANGO_SETTINGS_MODULE": self.app.get("settings_module", "core.settings"),
             "DATABASE_URL": (
                 f"postgresql://{self.app['db_user']}:"
@@ -757,7 +765,8 @@ class AppRunner:
         if not src.is_dir():
             return
         managed_keys = [
-            "DEBUG", "SECRET_KEY", "ALLOWED_HOSTS", "DJANGO_SETTINGS_MODULE",
+            "DEBUG", "SECRET_KEY", "ALLOWED_HOSTS", "CSRF_TRUSTED_ORIGINS",
+            "DJANGO_SETTINGS_MODULE",
             "DB_ENGINE", "DB_NAME", "DB_USER", "DB_PASS", "DB_HOST", "DB_PORT",
             "DATABASE_URL",
         ]

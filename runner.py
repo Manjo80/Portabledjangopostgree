@@ -690,6 +690,37 @@ class AppRunner:
                 self.log(f"  [{self.app['name']}] {line}")
         if r.returncode != 0:
             self.log(f"  [{self.app['name']}] collectstatic Warnung (returncode={r.returncode})")
+        # Extra-Dateien aus _portable_static/ in STATIC_ROOT einspielen
+        self._apply_portable_static(env)
+
+    def _apply_portable_static(self, env: dict) -> None:
+        """
+        Kopiert Dateien aus <source_path>/_portable_static/ nach <source_path>/staticfiles/.
+        Damit können Dateien (z.B. logo.png), die nicht im Git-Repo sind,
+        persistent bereitgestellt werden – einfach einmalig dort ablegen.
+
+        Beispiel:
+            <source_path>/_portable_static/img/logo.png
+            → <source_path>/staticfiles/img/logo.png
+        """
+        import shutil
+        source_path = Path(self.app["source_path"])
+        src = source_path / "_portable_static"
+        if not src.is_dir():
+            return
+        # Standard STATIC_ROOT = <source_path>/staticfiles  (Django-Konvention)
+        dst = source_path / "staticfiles"
+        dst.mkdir(parents=True, exist_ok=True)
+        copied = 0
+        for file in src.rglob("*"):
+            if file.is_file():
+                rel = file.relative_to(src)
+                target = dst / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(file), str(target))
+                copied += 1
+        if copied:
+            self.log(f"  [{self.app['name']}] _portable_static: {copied} Datei(en) nach staticfiles/ kopiert.")
 
     def _start_django(self) -> bool:
         self.log(f"  [{self.app['name']}] Starte Django (Port {self.app['port']}) …")

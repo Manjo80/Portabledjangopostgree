@@ -972,6 +972,7 @@ class PortableDjangoManager(ctk.CTk):
         self._build_ui()
         self._check_git()
         self._refresh()
+        self._update_pg_status()          # PostgreSQL-Status-Anzeige starten
         # PostgreSQL beim Start im Hintergrund starten
         threading.Thread(target=self._start_pg_server, daemon=True).start()
 
@@ -1020,6 +1021,40 @@ class PortableDjangoManager(ctk.CTk):
             row=3, column=0, sticky="ew", padx=14, pady=12
         )
 
+        # ── PostgreSQL-Status ─────────────────────────────────────────────
+        pg_section = ctk.CTkFrame(sidebar, fg_color=("gray85", "gray17"), corner_radius=8)
+        pg_section.grid(row=4, column=0, padx=14, pady=(0, 8), sticky="ew")
+        pg_section.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            pg_section, text="🐘  Datenbankserver",
+            font=ctk.CTkFont(size=12, weight="bold"), anchor="w",
+        ).grid(row=0, column=0, columnspan=2, padx=10, pady=(8, 2), sticky="w")
+
+        self._pg_status_label = ctk.CTkLabel(
+            pg_section, text="● prüfe …",
+            text_color="gray55", font=ctk.CTkFont(size=11), anchor="w",
+        )
+        self._pg_status_label.grid(row=1, column=0, columnspan=2, padx=10, sticky="w")
+
+        pg_btns = ctk.CTkFrame(pg_section, fg_color="transparent")
+        pg_btns.grid(row=2, column=0, columnspan=2, padx=8, pady=(4, 8), sticky="ew")
+        pg_btns.grid_columnconfigure((0, 1), weight=1)
+
+        ctk.CTkButton(
+            pg_btns, text="🔄 Neu starten", height=28,
+            font=ctk.CTkFont(size=11),
+            fg_color="gray35", hover_color="gray25",
+            command=self._pg_restart,
+        ).grid(row=0, column=0, padx=(0, 3), sticky="ew")
+
+        ctk.CTkButton(
+            pg_btns, text="⏹ Stoppen", height=28,
+            font=ctk.CTkFont(size=11),
+            fg_color="gray25", hover_color="gray15",
+            command=self._pg_stop,
+        ).grid(row=0, column=1, padx=(3, 0), sticky="ew")
+
         # Git-Status
         self._git_label = ctk.CTkLabel(
             sidebar,
@@ -1027,16 +1062,15 @@ class PortableDjangoManager(ctk.CTk):
             text_color="gray55",
             font=ctk.CTkFont(size=11),
         )
-        self._git_label.grid(row=4, column=0, padx=14, sticky="w")
+        self._git_label.grid(row=5, column=0, padx=14, sticky="w")
 
         # Info-Kasten
         info = ctk.CTkFrame(sidebar, fg_color=("gray85", "gray20"))
-        info.grid(row=5, column=0, padx=14, pady=12, sticky="ew")
+        info.grid(row=6, column=0, padx=14, pady=12, sticky="ew")
         ctk.CTkLabel(
             info,
             text="python/  und  postgres/\nmüssen im Tool-Ordner\nvorhanden sein.\n\n"
-                 "→ setup_environment.ps1\n\n"
-                 "🐘 Gemeinsamer PostgreSQL-\nServer für alle Apps.",
+                 "→ setup_environment.ps1",
             text_color="gray55",
             font=ctk.CTkFont(size=11),
             justify="left",
@@ -1297,15 +1331,38 @@ class PortableDjangoManager(ctk.CTk):
                 "Laufende App", "Bitte zuerst die App stoppen.", parent=self
             )
             return
-        if messagebox.askyesno(
-            "Löschen",
-            f"App '{app['name']}' wirklich entfernen?\n"
-            "(Quellcode und Datenbankdaten werden NICHT gelöscht.)",
+        if not messagebox.askyesno(
+            "App entfernen",
+            f"App '{app['name']}' aus der Liste entfernen?\n\n"
+            "Der Quellcode wird nicht gelöscht.",
             parent=self,
         ):
-            self.db.delete_app(app["id"])
-            self._log(f"App '{app['name']}' entfernt.")
-            self._refresh()
+            return
+
+        # Zusätzlich fragen ob die Datenbank gelöscht werden soll
+        drop_db = messagebox.askyesno(
+            "Datenbank löschen?",
+            f"Soll auch die PostgreSQL-Datenbank '{app['db_name']}'\n"
+            f"und der Benutzer '{app['db_user']}' unwiderruflich gelöscht werden?\n\n"
+            "Ja  = Datenbank + Benutzer löschen (nicht rückgängig!)\n"
+            "Nein = Datenbank behalten",
+            parent=self,
+        )
+        if drop_db:
+            if not self.pg_server.is_running():
+                messagebox.showwarning(
+                    "Datenbankserver gestoppt",
+                    "Der PostgreSQL-Server läuft nicht. "
+                    "Bitte starte ihn zuerst, um die Datenbank löschen zu können.",
+                    parent=self,
+                )
+                return
+            self.pg_server.drop_user_and_db(app["db_user"], app["db_name"])
+
+        self.db.delete_app(app["id"])
+        self._log(f"App '{app['name']}' entfernt." +
+                  (f" (Datenbank '{app['db_name']}' gelöscht.)" if drop_db else ""))
+        self._refresh()
 
     def _start_app(self, app: dict):
         if self._is_running(app["id"]):
@@ -1353,6 +1410,53 @@ class PortableDjangoManager(ctk.CTk):
         self.runners.clear()
         self._log("⏹ Alle Apps gestoppt.")
         self.after(1500, self._refresh)
+
+    # ── PostgreSQL-Server-Steuerung ───────────────────────────────────────
+
+    def _update_pg_status(self):
+        """Aktualisiert die PostgreSQL-Status-Anzeige in der Sidebar (alle 3 s)."""
+        try:
+            running = self.pg_server.is_running()
+            if running:
+                self._pg_status_label.configure(
+                    text="● läuft", text_color="#2ea043"
+                )
+            else:
+                self._pg_status_label.configure(
+                    text="● gestoppt", text_color="#f85149"
+                )
+        except Exception:
+            self._pg_status_label.configure(text="● unbekannt", text_color="gray55")
+        self.after(3000, self._update_pg_status)
+
+    def _pg_stop(self):
+        if self.runners:
+            messagebox.showwarning(
+                "Apps laufen",
+                "Bitte zuerst alle Apps stoppen, bevor der Datenbankserver beendet wird.",
+                parent=self,
+            )
+            return
+        threading.Thread(target=self.pg_server.stop, daemon=True).start()
+        self._log("⏹ Datenbankserver wird gestoppt …")
+
+    def _pg_restart(self):
+        if self.runners:
+            messagebox.showwarning(
+                "Apps laufen",
+                "Bitte zuerst alle Apps stoppen, bevor der Datenbankserver neu gestartet wird.",
+                parent=self,
+            )
+            return
+        def _do():
+            self.pg_server.stop()
+            ok = self.pg_server.start()
+            self._log_thread_safe(
+                "🔄 Datenbankserver neu gestartet." if ok
+                else "❌ Neustart des Datenbankservers fehlgeschlagen."
+            )
+        threading.Thread(target=_do, daemon=True).start()
+        self._log("🔄 Starte Datenbankserver neu …")
 
     def _open_browser(self, app: dict):
         webbrowser.open(f"http://localhost:{app['port']}")

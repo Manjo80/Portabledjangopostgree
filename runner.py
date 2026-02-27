@@ -518,14 +518,6 @@ class AppRunner:
             self.log(f"  Migrations-Fehler (returncode={r.returncode}): {out}")
             return False
 
-        # Statische Dateien (Fehler ignorieren)
-        subprocess.run(
-            [str(self._py), "manage.py", "collectstatic", "--noinput"],
-            cwd=self.app["source_path"],
-            env=env,
-            capture_output=True,
-        )
-
         # Superuser automatisch anlegen
         su_user = self.app.get("su_username", "").strip()
         su_pass = self.app.get("su_password", "").strip()
@@ -582,12 +574,7 @@ class AppRunner:
         else:
             self.log(f"  [{self.app['name']}] Migrationen OK.")
 
-        subprocess.run(
-            [str(self._py), "manage.py", "collectstatic", "--noinput"],
-            cwd=self.app["source_path"],
-            env=env,
-            capture_output=True,
-        )
+        self._run_collectstatic(env)
 
         return r.returncode == 0
 
@@ -686,10 +673,31 @@ class AppRunner:
 
     # ─── Django ───────────────────────────────────────────────────────────
 
+    def _run_collectstatic(self, env: dict) -> None:
+        """Collectstatic ausführen und Ausgabe in Log sichtbar machen."""
+        self.log(f"  [{self.app['name']}] collectstatic …")
+        r = subprocess.run(
+            [str(self._py), "manage.py", "collectstatic", "--noinput"],
+            cwd=self.app["source_path"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        out = (r.stdout + r.stderr).strip()
+        if out:
+            # Nur letzte 800 Zeichen ausgeben (kann lang sein)
+            for line in out[-800:].splitlines():
+                self.log(f"  [{self.app['name']}] {line}")
+        if r.returncode != 0:
+            self.log(f"  [{self.app['name']}] collectstatic Warnung (returncode={r.returncode})")
+
     def _start_django(self) -> bool:
         self.log(f"  [{self.app['name']}] Starte Django (Port {self.app['port']}) …")
         env = self._build_env()
         self._write_dotenv(env)
+        # Statische Dateien vor jedem Start sammeln (nicht nur beim Erstsetup),
+        # damit manuell hinzugefügte Dateien (z.B. Logo) immer aktuell sind.
+        self._run_collectstatic(env)
         with self._lock:
             self._dj_proc = subprocess.Popen(
                 [str(self._py), "manage.py", "runserver",

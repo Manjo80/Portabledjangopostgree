@@ -103,6 +103,7 @@ class SharedPostgresServer:
             "-E", "UTF8",
             "--no-locale",
             "--auth=trust",
+            "--timezone=UTC",   # Verhindert Timezone-Fehler auf portablen Systemen
         ]
         if pg_share.is_dir():
             cmd += ["-L", str(pg_share)]
@@ -115,9 +116,15 @@ class SharedPostgresServer:
             self._log(f"  [PostgreSQL] initdb FEHLER: {r.stderr.strip()[-500:]}")
             return False
 
-        # Port in postgresql.conf eintragen
+        # Port + Timezone (UTC) in postgresql.conf eintragen
+        # UTC ist immer verfügbar – kein share/timezone-Verzeichnis nötig
         with open(self.data_dir / "postgresql.conf", "a", encoding="utf-8") as f:
-            f.write(f"\nlisten_addresses = '127.0.0.1'\nport = {self.port}\n")
+            f.write(
+                f"\nlisten_addresses = '127.0.0.1'\n"
+                f"port = {self.port}\n"
+                f"timezone = 'UTC'\n"
+                f"log_timezone = 'UTC'\n"
+            )
 
         self._log(f"  [PostgreSQL] Datenbankcluster initialisiert (Port {self.port}).")
         return True

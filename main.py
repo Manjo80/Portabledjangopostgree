@@ -25,7 +25,7 @@ import customtkinter as ctk
 
 from db import Database
 from git_manager import GitManager
-from runner import AppRunner, BASE_DIR
+from runner import AppRunner, SharedPostgresServer, BASE_DIR
 
 # ─── Erscheinungsbild ─────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -310,6 +310,7 @@ class AppDialog(ctk.CTkToplevel):
 
         # Name
         self.v_name = ctk.StringVar()
+        self.v_name.trace_add("write", lambda *_: self._on_name_change())
         self._lbl_row(r, "Name:", ctk.CTkEntry(cf, textvariable=self.v_name)); r += 1
 
         # ── Quell-Modus Toggle ────────────────────────────────────────────
@@ -498,33 +499,30 @@ class AppDialog(ctk.CTkToplevel):
             row=r, column=0, columnspan=3, sticky="ew", padx=20, pady=8
         ); r += 1
         ctk.CTkLabel(
-            cf, text="Datenbank", font=ctk.CTkFont(size=13, weight="bold")
+            cf, text="Datenbank  (wird automatisch angelegt)",
+            font=ctk.CTkFont(size=13, weight="bold")
         ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20); r += 1
 
-        # DB-Felder
+        ctk.CTkLabel(
+            cf,
+            text="DB-Name, Benutzer und Passwort werden automatisch aus dem App-Namen\n"
+                 "generiert und sicher gespeichert. Kein manueller Eingriff nötig.",
+            text_color="gray55", font=ctk.CTkFont(size=11),
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20, pady=(0, 6)); r += 1
+
+        # DB-Info-Felder (read-only, nur zur Anzeige)
         self.v_db_name = ctk.StringVar()
-        self._lbl_row(r, "Datenbankname:", ctk.CTkEntry(cf, textvariable=self.v_db_name)); r += 1
+        db_name_entry = ctk.CTkEntry(cf, textvariable=self.v_db_name, state="disabled")
+        self._lbl_row(r, "Datenbankname:", db_name_entry); r += 1
 
         self.v_db_user = ctk.StringVar()
-        self._lbl_row(r, "DB-Benutzer:", ctk.CTkEntry(cf, textvariable=self.v_db_user)); r += 1
+        db_user_entry = ctk.CTkEntry(cf, textvariable=self.v_db_user, state="disabled")
+        self._lbl_row(r, "DB-Benutzer:", db_user_entry); r += 1
 
         self.v_db_pass = ctk.StringVar()
-        pw_frame = ctk.CTkFrame(cf, fg_color="transparent")
-        pw_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkEntry(pw_frame, textvariable=self.v_db_pass, show="●").grid(
-            row=0, column=0, sticky="ew"
-        )
-        ctk.CTkButton(
-            pw_frame, text="⟳", width=36,
-            command=lambda: self.v_db_pass.set(_random_password()),
-        ).grid(row=0, column=1, padx=(6, 0))
-        ctk.CTkLabel(cf, text="DB-Passwort:", anchor="w").grid(
-            row=r, column=0, sticky="w", **pad
-        )
-        pw_frame.grid(row=r, column=1, columnspan=2, sticky="ew", **pad); r += 1
-
-        self.v_db_port = ctk.StringVar(value="5433")
-        self._lbl_row(r, "DB-Port:", ctk.CTkEntry(cf, textvariable=self.v_db_port, width=100)); r += 1
+        db_pass_entry = ctk.CTkEntry(cf, textvariable=self.v_db_pass,
+                                     state="disabled", show="●")
+        self._lbl_row(r, "DB-Passwort:", db_pass_entry); r += 1
 
         # ── Umgebungsvariablen ────────────────────────────────────────────
         ctk.CTkFrame(cf, height=1, fg_color="gray30").grid(
@@ -747,15 +745,23 @@ class AppDialog(ctk.CTkToplevel):
         self._ssh_status_lbl.configure(
             text=msg, text_color=colors.get(color, color))
 
+    def _on_name_change(self):
+        """Aktualisiert DB-Felder wenn der App-Name geändert wird."""
+        name = self.v_name.get().strip()
+        if name:
+            sl = _slug(name)
+            self.v_db_name.set(sl)
+            self.v_db_user.set(sl)
+            if not self.v_db_pass.get():
+                self.v_db_pass.set(_random_password())
+
     def _autofill_from_name(self, name: str):
-        """Füllt DB-Felder aus wenn noch leer."""
-        sl = _slug(name)
+        """Füllt App-Name und DB-Felder aus einem Verzeichnisnamen."""
         if not self.v_name.get():
             self.v_name.set(name)
-        if not self.v_db_name.get():
-            self.v_db_name.set(sl)
-        if not self.v_db_user.get():
-            self.v_db_user.set(sl)
+        sl = _slug(name)
+        self.v_db_name.set(sl)
+        self.v_db_user.set(sl)
         if not self.v_db_pass.get():
             self.v_db_pass.set(_random_password())
 
@@ -794,7 +800,6 @@ class AppDialog(ctk.CTkToplevel):
         self.v_db_name.set(app.get("db_name", ""))
         self.v_db_user.set(app.get("db_user", ""))
         self.v_db_pass.set(app.get("db_password", ""))
-        self.v_db_port.set(str(app.get("db_port", 5433)))
 
         mode = app.get("source_mode", "local")
         if mode == "github":
@@ -828,10 +833,9 @@ class AppDialog(ctk.CTkToplevel):
             return
 
         try:
-            port    = int(self.v_port.get())
-            db_port = int(self.v_db_port.get())
+            port = int(self.v_port.get())
         except ValueError:
-            messagebox.showerror("Fehler", "Ports müssen Zahlen sein.", parent=self)
+            messagebox.showerror("Fehler", "App-Port muss eine Zahl sein.", parent=self)
             return
 
         is_github = "GitHub" in self.v_mode.get()
@@ -877,7 +881,7 @@ class AppDialog(ctk.CTkToplevel):
             "db_name":         self.v_db_name.get().strip() or sl,
             "db_user":         self.v_db_user.get().strip() or sl,
             "db_password":     self.v_db_pass.get() or _random_password(),
-            "db_port":         db_port,
+            "db_port":         SharedPostgresServer.DEFAULT_PORT,
             "source_mode":     source_mode,
             "repo_url":        repo_url,
             "repo_branch":     branch,
@@ -905,9 +909,30 @@ class PortableDjangoManager(ctk.CTk):
         self.git     = GitManager(log_callback=self._log_thread_safe)
         self.runners: dict[int, AppRunner] = {}
 
+        # Gemeinsamer PostgreSQL-Server (ein Prozess für alle Apps)
+        pg_port = int(self.db.get_setting("pg_port") or SharedPostgresServer.DEFAULT_PORT)
+        self.pg_server = SharedPostgresServer(
+            base_dir=BASE_DIR,
+            port=pg_port,
+            log_callback=self._log_thread_safe,
+        )
+
         self._build_ui()
         self._check_git()
         self._refresh()
+        # PostgreSQL beim Start im Hintergrund starten
+        threading.Thread(target=self._start_pg_server, daemon=True).start()
+
+    def _start_pg_server(self):
+        ok = self.pg_server.start()
+        if ok:
+            self._log_thread_safe(
+                f"  [PostgreSQL] Gemeinsamer Server bereit (Port {self.pg_server.port})."
+            )
+        else:
+            self._log_thread_safe(
+                "  [PostgreSQL] FEHLER: Gemeinsamer Server konnte nicht gestartet werden!"
+            )
 
     # ─── UI-Aufbau ────────────────────────────────────────────────────────
 
@@ -957,7 +982,9 @@ class PortableDjangoManager(ctk.CTk):
         info.grid(row=5, column=0, padx=14, pady=12, sticky="ew")
         ctk.CTkLabel(
             info,
-            text="python/  und  postgres/\nmüssen im Tool-Ordner\nvorhanden sein.\n\n→ setup_environment.ps1",
+            text="python/  und  postgres/\nmüssen im Tool-Ordner\nvorhanden sein.\n\n"
+                 "→ setup_environment.ps1\n\n"
+                 "🐘 Gemeinsamer PostgreSQL-\nServer für alle Apps.",
             text_color="gray55",
             font=ctk.CTkFont(size=11),
             justify="left",
@@ -1132,13 +1159,17 @@ class PortableDjangoManager(ctk.CTk):
                 command=lambda a=app: self._update_repo(a),
             ).pack(side="left", padx=2)
 
-        # Superuser-Button (nur wenn initdb bereits gelaufen ist)
-        app_data_dir = BASE_DIR / "data" / f"app_{app['id']}"
-        if (app_data_dir / "PG_VERSION").exists():
+        # Superuser- und Reset-Buttons (nur wenn Setup bereits abgeschlossen)
+        if app.get("setup_done", 0):
             ctk.CTkButton(
                 btns, text="👤", width=36,
                 fg_color="gray40", hover_color="#8e44ad",
                 command=lambda a=app: self._create_superuser(a),
+            ).pack(side="left", padx=2)
+            ctk.CTkButton(
+                btns, text="🗄", width=36,
+                fg_color="gray40", hover_color="#c0392b",
+                command=lambda a=app: self._reset_db(a),
             ).pack(side="left", padx=2)
 
         ctk.CTkButton(
@@ -1187,6 +1218,15 @@ class PortableDjangoManager(ctk.CTk):
                     result["settings_module"] = detected
                     self._log(f"  Settings-Modul erkannt: {detected}")
 
+        # DB-Felder aus App-Namen generieren falls leer (z.B. bei Direkt-Eingabe des Namens)
+        sl = _slug(result["name"])
+        if not result.get("db_name"):
+            result["db_name"] = sl
+        if not result.get("db_user"):
+            result["db_user"] = sl
+        if not result.get("db_password"):
+            result["db_password"] = _random_password()
+
         self.db.add_app(**result)
         self._log(f"App '{result['name']}' hinzugefügt.")
         self._refresh()
@@ -1218,8 +1258,24 @@ class PortableDjangoManager(ctk.CTk):
     def _start_app(self, app: dict):
         if self._is_running(app["id"]):
             return
+
+        # PostgreSQL starten falls noch nicht bereit
+        if not self.pg_server.is_running():
+            self._log(f"  [PostgreSQL] Starte gemeinsamen Server …")
+            ok = self.pg_server.start()
+            if not ok:
+                self._log("  [PostgreSQL] FEHLER: Server konnte nicht gestartet werden.")
+                return
+
+        def _mark_done(app_id: int):
+            self.db.update_app(app_id, setup_done=1)
+
         runner = AppRunner(
-            app, base_dir=BASE_DIR, log_callback=self._log_thread_safe
+            app,
+            pg_server=self.pg_server,
+            base_dir=BASE_DIR,
+            log_callback=self._log_thread_safe,
+            setup_done_callback=_mark_done,
         )
         self.runners[app["id"]] = runner
         self._log(f"▶ Starte '{app['name']}' …")
@@ -1258,13 +1314,18 @@ class PortableDjangoManager(ctk.CTk):
         if not dlg.result:
             return
         d = dlg.result
-        # Temporären Runner nutzen (oder laufenden, falls vorhanden)
         runner = self.runners.get(app["id"]) or AppRunner(
-            app, base_dir=BASE_DIR, log_callback=self._log_thread_safe
+            app,
+            pg_server=self.pg_server,
+            base_dir=BASE_DIR,
+            log_callback=self._log_thread_safe,
         )
         self._log(f"👤 Erstelle Superuser '{d['username']}' für '{app['name']}' …")
 
         def _run():
+            # PostgreSQL starten falls nötig
+            if not self.pg_server.is_running():
+                self.pg_server.start()
             ok, msg = runner.create_superuser(d["username"], d["email"], d["password"])
             symbol = "✅" if ok else "❌"
             self._log_thread_safe(f"  {symbol} {msg}")
@@ -1274,6 +1335,41 @@ class PortableDjangoManager(ctk.CTk):
                 self.after(0, lambda: messagebox.showerror("Fehler", msg, parent=self))
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def _reset_db(self, app: dict):
+        """Löscht DB + User der App und richtet sie neu ein."""
+        if self._is_running(app["id"]):
+            messagebox.showwarning(
+                "App läuft",
+                "Bitte zuerst die App stoppen, bevor die Datenbank zurückgesetzt wird.",
+                parent=self,
+            )
+            return
+        if not messagebox.askyesno(
+            "Datenbank zurücksetzen",
+            f"Alle Daten der App '{app['name']}' unwiderruflich löschen?\n\n"
+            f"Datenbank: {app['db_name']}\n"
+            f"Benutzer: {app['db_user']}\n\n"
+            "Der Quellcode bleibt erhalten. Nur die Datenbankdaten werden gelöscht.",
+            parent=self,
+        ):
+            return
+
+        self._log(f"🗄 Setze Datenbank für '{app['name']}' zurück …")
+
+        def _do_reset():
+            if not self.pg_server.is_running():
+                self.pg_server.start()
+            self.pg_server.drop_user_and_db(app["db_user"], app["db_name"])
+            # setup_done zurücksetzen damit _setup() beim nächsten Start neu läuft
+            self.db.update_app(app["id"], setup_done=0)
+            self._log_thread_safe(
+                f"  ✅ Datenbank '{app['name']}' zurückgesetzt. "
+                f"Beim nächsten Start wird die DB neu eingerichtet."
+            )
+            self.after(0, self._refresh)
+
+        threading.Thread(target=_do_reset, daemon=True).start()
 
     # ─── GitHub Update ────────────────────────────────────────────────────
 
@@ -1310,11 +1406,14 @@ class PortableDjangoManager(ctk.CTk):
                 return
 
             # Migrationen ausführen wenn Datenbank bereits eingerichtet
-            data_dir = BASE_DIR / "data" / f"app_{app['id']}" / "PG_VERSION"
-            if data_dir.exists():
+            if app.get("setup_done", 0):
                 self._log_thread_safe("  Führe Django-Migrationen aus …")
+                if not self.pg_server.is_running():
+                    self.pg_server.start()
                 runner = AppRunner(
-                    app, base_dir=BASE_DIR,
+                    app,
+                    pg_server=self.pg_server,
+                    base_dir=BASE_DIR,
                     log_callback=self._log_thread_safe,
                 )
                 runner._run_migrations()
@@ -1371,9 +1470,17 @@ class PortableDjangoManager(ctk.CTk):
             ):
                 return
             self._stop_all()
-            self.after(1800, self.destroy)
+            # Apps + PostgreSQL stoppen und dann beenden
+            def _shutdown():
+                import time as _time
+                _time.sleep(1)
+                self.pg_server.stop()
+                self.after(0, self.destroy)
+            threading.Thread(target=_shutdown, daemon=True).start()
         else:
-            self.destroy()
+            # PostgreSQL sauber stoppen
+            threading.Thread(target=self.pg_server.stop, daemon=True).start()
+            self.after(1500, self.destroy)
 
 
 # ─── Einstiegspunkt ──────────────────────────────────────────────────────────

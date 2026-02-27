@@ -1625,18 +1625,37 @@ class PortableDjangoManager(ctk.CTk):
                 parent=self,
             ):
                 return
-            self._stop_all()
-            # Apps + PostgreSQL stoppen und dann beenden
-            def _shutdown():
-                import time as _time
-                _time.sleep(1)
-                self.pg_server.stop()
-                self.after(0, self.destroy)
-            threading.Thread(target=_shutdown, daemon=True).start()
-        else:
-            # PostgreSQL sauber stoppen
-            threading.Thread(target=self.pg_server.stop, daemon=True).start()
-            self.after(1500, self.destroy)
+
+        # Fenster sofort verstecken – Nutzer sieht "fertig", Prozesse laufen noch
+        self.withdraw()
+
+        def _full_shutdown():
+            # 1) Alle Django-Runner synchron stoppen (warten bis wirklich beendet)
+            stop_threads = [
+                threading.Thread(target=r.stop, daemon=False)
+                for r in self.runners.values()
+            ]
+            for t in stop_threads:
+                t.start()
+            for t in stop_threads:
+                t.join(timeout=8)
+            self.runners.clear()
+
+            # 2) PostgreSQL synchron stoppen (warten bis Prozess beendet)
+            self.pg_server.stop()
+
+            # 3) Python-Prozess vollständig beenden → gibt python.exe-Lock frei
+            self.after(0, self._final_exit)
+
+        threading.Thread(target=_full_shutdown, daemon=False).start()
+
+    def _final_exit(self):
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        import os
+        os._exit(0)  # Beendet python.exe sofort – alle Datei-Locks werden freigegeben
 
 
 # ─── Einstiegspunkt ──────────────────────────────────────────────────────────

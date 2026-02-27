@@ -56,6 +56,10 @@ class Database:
                     settings_module TEXT    NOT NULL DEFAULT 'core.settings',
                     secret_key      TEXT    NOT NULL DEFAULT '',
                     extra_env       TEXT    NOT NULL DEFAULT '{}',
+                    -- Superuser (automatisch beim Setup angelegt)
+                    su_username     TEXT    NOT NULL DEFAULT 'admin',
+                    su_email        TEXT    NOT NULL DEFAULT 'admin@example.com',
+                    su_password     TEXT    NOT NULL DEFAULT '',
                     created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
                 );
 
@@ -77,6 +81,10 @@ class Database:
             ("settings_module","TEXT NOT NULL DEFAULT 'core.settings'"),
             ("secret_key",     "TEXT NOT NULL DEFAULT ''"),
             ("extra_env",      "TEXT NOT NULL DEFAULT '{}'"),
+            # Superuser (wird beim Ersteinrichtung automatisch angelegt)
+            ("su_username",    "TEXT NOT NULL DEFAULT 'admin'"),
+            ("su_email",       "TEXT NOT NULL DEFAULT 'admin@example.com'"),
+            ("su_password",    "TEXT NOT NULL DEFAULT ''"),
         ]
         with self._lock, self._connect() as conn:
             for col, defn in new_cols:
@@ -108,7 +116,7 @@ class Database:
         db_name: str,
         db_user: str,
         db_password: str,
-        db_port: int = 5433,
+        db_port: int = 5432,
         python_version: str = "3.12.8",
         source_mode: str = "local",
         repo_url: str = "",
@@ -118,6 +126,9 @@ class Database:
         settings_module: str = "core.settings",
         secret_key: str = "",
         extra_env: str = "{}",
+        su_username: str = "admin",
+        su_email: str = "admin@example.com",
+        su_password: str = "",
     ) -> int:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -125,12 +136,14 @@ class Database:
                    (name, source_path, port, db_name, db_user, db_password,
                     db_port, python_version,
                     source_mode, repo_url, repo_branch, ssh_key_path,
-                    allowed_hosts, settings_module, secret_key, extra_env)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    allowed_hosts, settings_module, secret_key, extra_env,
+                    su_username, su_email, su_password)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, source_path, port, db_name, db_user, db_password,
                  db_port, python_version,
                  source_mode, repo_url, repo_branch, ssh_key_path,
-                 allowed_hosts, settings_module, secret_key, extra_env),
+                 allowed_hosts, settings_module, secret_key, extra_env,
+                 su_username, su_email, su_password),
             )
             conn.commit()
             return conn.execute("SELECT last_insert_rowid()").fetchone()[0]

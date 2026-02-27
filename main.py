@@ -524,6 +524,42 @@ class AppDialog(ctk.CTkToplevel):
                                      state="disabled", show="●")
         self._lbl_row(r, "DB-Passwort:", db_pass_entry); r += 1
 
+        # ── Superuser ─────────────────────────────────────────────────────
+        ctk.CTkFrame(cf, height=1, fg_color="gray30").grid(
+            row=r, column=0, columnspan=3, sticky="ew", padx=20, pady=8
+        ); r += 1
+        ctk.CTkLabel(
+            cf, text="Superuser  (wird beim ersten Start automatisch angelegt)",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20); r += 1
+
+        self.v_su_user = ctk.StringVar(value="admin")
+        self._lbl_row(r, "Benutzername:", ctk.CTkEntry(cf, textvariable=self.v_su_user)); r += 1
+
+        self.v_su_email = ctk.StringVar(value="admin@example.com")
+        self._lbl_row(r, "E-Mail:", ctk.CTkEntry(cf, textvariable=self.v_su_email)); r += 1
+
+        self.v_su_pass = ctk.StringVar()
+        su_pw_frame = ctk.CTkFrame(cf, fg_color="transparent")
+        su_pw_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkEntry(su_pw_frame, textvariable=self.v_su_pass, show="●").grid(
+            row=0, column=0, sticky="ew"
+        )
+        ctk.CTkButton(
+            su_pw_frame, text="⟳", width=36,
+            command=lambda: self.v_su_pass.set(_random_password(16)),
+        ).grid(row=0, column=1, padx=(6, 0))
+        ctk.CTkLabel(cf, text="Passwort:", anchor="w").grid(
+            row=r, column=0, sticky="w", **pad
+        )
+        su_pw_frame.grid(row=r, column=1, columnspan=2, sticky="ew", **pad); r += 1
+
+        ctk.CTkLabel(
+            cf,
+            text="Wird einmalig beim Setup gespeichert und danach nicht mehr benötigt.",
+            text_color="gray55", font=ctk.CTkFont(size=11),
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=20, pady=(0, 4)); r += 1
+
         # ── Umgebungsvariablen ────────────────────────────────────────────
         ctk.CTkFrame(cf, height=1, fg_color="gray30").grid(
             row=r, column=0, columnspan=3, sticky="ew", padx=20, pady=8
@@ -813,6 +849,11 @@ class AppDialog(ctk.CTkToplevel):
             self._on_mode_change("📁  Lokaler Ordner")
             self.v_source.set(app.get("source_path", ""))
 
+        # Superuser-Felder befüllen
+        self.v_su_user.set(app.get("su_username", "admin"))
+        self.v_su_email.set(app.get("su_email", "admin@example.com"))
+        self.v_su_pass.set(app.get("su_password", ""))
+
         # Umgebungsvariablen befüllen
         self.v_settings_module.set(app.get("settings_module", "core.settings"))
         self.v_allowed_hosts.set(app.get("allowed_hosts", "localhost,127.0.0.1"))
@@ -873,6 +914,14 @@ class AppDialog(ctk.CTkToplevel):
             if k.get().strip()
         }
 
+        su_user = self.v_su_user.get().strip() or "admin"
+        su_pass = self.v_su_pass.get()
+        if not su_pass:
+            messagebox.showerror(
+                "Fehler", "Superuser-Passwort darf nicht leer sein.", parent=self
+            )
+            return
+
         sl = _slug(name)
         self.result = {
             "name":            name,
@@ -890,6 +939,9 @@ class AppDialog(ctk.CTkToplevel):
             "allowed_hosts":   self.v_allowed_hosts.get().strip() or "localhost,127.0.0.1",
             "secret_key":      self.v_secret_key.get().strip(),
             "extra_env":       json.dumps(extra),
+            "su_username":     su_user,
+            "su_email":        self.v_su_email.get().strip() or "admin@example.com",
+            "su_password":     su_pass,
         }
         self.destroy()
 

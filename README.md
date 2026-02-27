@@ -1,19 +1,20 @@
 # Portable Django Manager
 
-Ein grafisches Windows-Tool zum Verwalten und Testen mehrerer Django-Webanwendungen auf einem lokalen Windows-Rechner – ohne Installation, ohne Admin-Rechte, portabel auf USB-Stick oder Netzlaufwerk.
+Ein grafisches Windows-Tool zum Betreiben mehrerer Django-Webanwendungen – ohne Installation, ohne Admin-Rechte, portabel auf USB-Stick oder Netzlaufwerk.
+
+Mit nginx als Reverse-Proxy und waitress als WSGI-Server eignet sich das Tool nicht nur für die lokale Entwicklung, sondern auch als **kleiner interner Test- oder Demo-Server** im LAN.
 
 ---
 
-## Übersicht
+## Was ist drin
 
-Der Portable Django Manager bündelt:
-
-- **Eingebettetes Python 3.12** – kein System-Python nötig
-- **Portables PostgreSQL 16** – kein Datenbankserver nötig
-- **Grafische Oberfläche** (customtkinter, Dark-Theme) zur Verwaltung mehrerer Apps
-- **GitHub / Git-Integration** – Repos per HTTPS oder SSH klonen und aktualisieren
-
-Jede verwaltete App bekommt ihre eigene PostgreSQL-Datenbank und läuft auf einem frei wählbaren Port. Ersteinrichtung (initdb, Migrationen) läuft automatisch beim ersten Start.
+| Komponente | Version | Zweck |
+|---|---|---|
+| **Python** (embedded) | 3.12 | Django-Laufzeit – kein System-Python nötig |
+| **PostgreSQL** (portabel) | 16 | Datenbank – keine Installation nötig |
+| **nginx** (portabel) | 1.26.3 | Reverse-Proxy: static/media direkt, Django dynamisch |
+| **waitress** (pip) | aktuell | Produktionsreifer WSGI-Server (multi-threaded) |
+| **customtkinter** | – | Grafische Oberfläche (Dark-Theme) |
 
 ---
 
@@ -25,58 +26,58 @@ Jede verwaltete App bekommt ihre eigene PostgreSQL-Datenbank und läuft auf eine
 # Skript entsperren (einmalig nach Download / USB-Kopie)
 Unblock-File -Path .\setup_environment.ps1
 
-# Anschließend ausführen
+# Ausführen – lädt Python + PostgreSQL + nginx herunter
 .\setup_environment.ps1
 ```
 
-> **Hinweis:** PostgreSQL-Download ca. 300 MB – ausreichend Zeit einplanen.
+Das Skript lädt herunter und richtet ein:
+- `python\` – eingebettetes Python 3.12 (~30 MB)
+- `postgres\` – portables PostgreSQL 16 (~300 MB)
+- `nginx\nginx-1.26.3\` – portables nginx (~1.5 MB)
 
 > **PowerShell-Fehler „not digitally signed"?**
-> Windows setzt beim Download oder Kopieren von USB/Netzlaufwerk ein Internet-Flag auf die Datei.
-> Lösung: `Unblock-File` (siehe oben) oder einmalig mit Bypass starten:
 > ```powershell
 > powershell -ExecutionPolicy Bypass -File .\setup_environment.ps1
 > ```
-> Alle `.ps1`-Dateien im Ordner auf einmal entsperren:
+> Alle `.ps1`-Dateien auf einmal entsperren:
 > ```powershell
 > Get-ChildItem C:\portable -Filter *.ps1 | Unblock-File
 > ```
 
-#### PostgreSQL-ZIP manuell bereitstellen (optional)
-
-Falls der automatische Download nicht klappt:
-1. ZIP von [enterprisedb.com/download-postgresql-binaries](https://www.enterprisedb.com/download-postgresql-binaries) herunterladen
-2. Als `postgresql-binaries.zip` neben das Skript legen
-3. Skript mit `-SkipPostgresDownload` erneut starten:
+#### Setup-Optionen
 
 ```powershell
+# nginx-Download überspringen (nicht benötigt)
+.\setup_environment.ps1 -SkipNginxDownload
+
+# PostgreSQL-Download überspringen (ZIP muss als postgresql-binaries.zip vorliegen)
 .\setup_environment.ps1 -SkipPostgresDownload
+
+# Andere Versionen
+.\setup_environment.ps1 -NginxVersion "1.27.0"
 ```
 
 ---
 
 ### 2. Tool starten
 
-**Direkt mit Python:**
 ```cmd
+# Direkt mit Python (Entwicklung)
 python main.py
-```
 
-**Als EXE (nach Build):**
-```
+# Als EXE
 PortableDjangoManager.exe
 ```
 
 ---
 
-### 3. EXE erstellen (Windows)
+### 3. EXE erstellen
 
 ```cmd
 build_exe.bat
 ```
 
-Erstellt `dist\PortableDjangoManager.exe` mit PyInstaller.
-Die EXE funktioniert auf jedem Windows 10/11 (64-Bit) ohne Python-Installation – vorausgesetzt `python\` und `postgres\` liegen daneben.
+Erzeugt `dist\PortableDjangoManager.exe` via PyInstaller. Die EXE läuft auf jedem Windows 10/11 (64-Bit) ohne Python-Installation – `python\`, `postgres\` und `nginx\` müssen daneben liegen.
 
 ---
 
@@ -88,20 +89,23 @@ PortableDjangoManager\
 ├── PortableDjangoManager.exe   ← Hauptprogramm (nach build_exe.bat)
 ├── main.py                     ← Hauptprogramm (Quellcode)
 ├── db.py                       ← SQLite-Konfigurationsspeicher
-├── runner.py                   ← Prozess-Manager (Django + PostgreSQL)
+├── runner.py                   ← Prozess-Manager (Django + PostgreSQL + nginx)
+├── nginx_manager.py            ← nginx-Wrapper (Config, Start/Stop, Download)
 ├── git_manager.py              ← Git-Integration (Clone / Pull / SSH)
 ├── requirements.txt            ← Python-Abhängigkeiten
 ├── build_exe.bat               ← EXE-Builder (PyInstaller)
-├── setup_environment.ps1       ← Lädt Python + PostgreSQL herunter
+├── setup_environment.ps1       ← Setup: Python + PostgreSQL + nginx
 │
 ├── python\                     ← Eingebettetes Python 3.12 (nach Setup)
 ├── postgres\                   ← Portables PostgreSQL 16 (nach Setup)
+├── nginx\                      ← Portables nginx 1.26.3 (nach Setup)
+│   └── nginx-1.26.3\
+│       ├── nginx.exe
+│       └── conf\mime.types
 │
 ├── apps.db                     ← SQLite mit App-Konfigurationen (auto)
 ├── repos\                      ← Lokale Git-Klone (auto bei GitHub-Apps)
-│   └── meine_app\
-├── data\                       ← PostgreSQL-Datenbankdaten pro App (auto)
-│   └── app_1\
+├── data\                       ← PostgreSQL-Datenbankdaten (auto)
 └── logs\                       ← Logdateien (auto)
 ```
 
@@ -113,37 +117,104 @@ Im Hauptfenster auf **＋ App hinzufügen** klicken.
 
 ### Quelle: Lokaler Ordner
 
-Beliebiges Django-Projektverzeichnis auf dem PC oder Netzlaufwerk auswählen. Das Verzeichnis muss eine `manage.py` enthalten.
+Beliebiges Django-Projektverzeichnis wählen. Muss eine `manage.py` enthalten.
 
 ### Quelle: GitHub / Git-Repository
 
 | Feld | Beschreibung |
 |---|---|
 | **Repository-URL** | HTTPS: `https://github.com/user/repo`<br>SSH: `git@github.com:user/repo.git` |
-| **Branch** | Gewünschter Branch, z. B. `main` oder `develop` |
-| **SSH-Schlüssel** *(optional)* | Pfad zum privaten SSH-Schlüssel, z. B. `C:\Users\max\.ssh\id_rsa`<br>Leer lassen für HTTPS oder Standard-SSH-Konfiguration |
+| **Branch** | z. B. `main` oder `develop` |
+| **SSH-Schlüssel** *(optional)* | Privater Schlüssel; leer lassen für HTTPS |
 
-Beim Speichern wird das Repository sofort geklont (`git clone --depth 1`).
+Beim Speichern wird das Repository sofort geklont.
+
+---
+
+## nginx-Konfiguration
+
+Im App-Dialog gibt es die Sektion **nginx (optionaler Reverse-Proxy)**.
+
+| Einstellung | Standard | Bedeutung |
+|---|---|---|
+| **nginx aktivieren** | aus | nginx als Reverse-Proxy vor Django schalten |
+| **nginx-Port** | `80` | Außen-Port (User greift hier drauf zu) |
+
+### Was nginx übernimmt
+
+```
+Browser → nginx :80
+  ├── /static/*  →  staticfiles/ direkt (kein Django-Overhead)
+  ├── /media/*   →  media/ direkt
+  └── /*         →  proxy_pass → waitress :8000 (Django)
+```
+
+- Statische Dateien werden von nginx direkt ausgeliefert, mit `Cache-Control: public, max-age=7d`
+- Django bekommt **nur noch dynamische Requests**
+- Ohne nginx: Django-Runserver mit `--insecure` (Entwicklungsmodus)
+
+### nginx + waitress = Test-Server-Modus
+
+Wenn nginx aktiviert ist, startet der Runner automatisch **waitress** statt `manage.py runserver`:
+
+| | runserver (ohne nginx) | waitress + nginx |
+|---|---|---|
+| Requests gleichzeitig | 1 (single-thread) | 8 Threads |
+| Static files | Django (langsam) | nginx (schnell) |
+| Geeignet für | Lokale Entwicklung | Interner Test-Server |
+| WSGI-Standard | ✗ (Dev-only) | ✅ |
+
+waitress wird beim ersten Start automatisch via pip installiert.
+
+---
+
+## Fehlende statische Dateien (z. B. Logo)
+
+Dateien die nicht im Git-Repository der App sind (z. B. ein Logo), können dauerhaft bereitgestellt werden ohne das Repo zu ändern:
+
+1. Ordner `_portable_static/` im App-Quellverzeichnis anlegen
+2. Dateien dort ablegen, z. B. `_portable_static/img/logo.png`
+3. Bei jedem App-Start werden sie automatisch nach `staticfiles/` kopiert
+
+```
+meine_app\
+├── manage.py
+├── staticfiles\         ← wird automatisch befüllt
+└── _portable_static\    ← hier eigene Dateien ablegen
+    └── img\
+        └── logo.png
+```
+
+---
+
+## Auto-Restart
+
+Wenn Django oder waitress unerwartet abstürzt (nicht durch manuellen Stop), wird der Prozess automatisch neu gestartet – bis zu **5 Mal**, mit 5 Sekunden Pause. Im Log erscheint:
+
+```
+[meine_app] ⚠ Prozess unerwartet beendet – Neustart 1/5 in 5 s …
+[meine_app] ✅ Neustart 1 erfolgreich.
+```
 
 ---
 
 ## Umgebungsvariablen & .env-Datei
 
-Im App-Dialog gibt es den Abschnitt **Umgebungsvariablen** mit folgenden Feldern:
+Im App-Dialog → Abschnitt **Umgebungsvariablen**:
 
 | Feld | Standard | Bedeutung |
 |---|---|---|
-| **Settings-Modul** | `core.settings` | `DJANGO_SETTINGS_MODULE` – Pfad zum Django-Settings-Modul, z. B. `myapp.settings.dev` |
-| **Allowed Hosts** | `localhost,127.0.0.1` | Kommagetrennte Liste erlaubter Hosts; wichtig wenn die App über eine IP oder einen Hostnamen erreichbar sein soll |
-| **SECRET_KEY** | *(leer)* | Überschreibt den `SECRET_KEY` aus `settings.py`. Mit ⟳ wird automatisch ein sicherer Zufallswert erzeugt |
-| **Weitere Vars** | – | Beliebige eigene KEY=VALUE-Paare (z. B. API-Keys, E-Mail-Config, Feature-Flags) |
+| **Settings-Modul** | `core.settings` | `DJANGO_SETTINGS_MODULE` |
+| **Allowed Hosts** | `localhost,127.0.0.1` | Für LAN-Zugriff: IP des Rechners eintragen |
+| **SECRET_KEY** | *(leer)* | Überschreibt den Key aus `settings.py` (⟳ = sicher zufällig) |
+| **Weitere Vars** | – | Beliebige KEY=VALUE-Paare |
 
-### .env-Datei wird automatisch erstellt
+### Generierte .env-Datei
 
-Beim **Start** einer App schreibt das Tool automatisch eine `.env`-Datei ins App-Quellverzeichnis. Inhalt:
+Beim Start wird automatisch eine `.env` ins App-Quellverzeichnis geschrieben:
 
-```
-DEBUG="True"
+```env
+DEBUG="False"
 ALLOWED_HOSTS="localhost,127.0.0.1"
 DJANGO_SETTINGS_MODULE=core.settings
 DB_NAME=meine_app
@@ -152,27 +223,25 @@ DB_PASS=<generiertes-passwort>
 DB_HOST=127.0.0.1
 DB_PORT=5433
 DATABASE_URL="postgresql://meine_app:passwort@127.0.0.1:5433/meine_app"
-# + alle weiteren konfigurierten Vars
+SECRET_KEY=<sicherer-zufallsschlüssel>
 ```
 
-Die `.env` wird bei jedem Start aktualisiert – Änderungen im GUI sind sofort beim nächsten Start wirksam.
+> Hinweis: `DEBUG=False` ist Standard. Django läuft im Produktionsmodus.
 
 ### settings.py anpassen
 
-Die Django-`settings.py` muss die Variablen aus der `.env` einlesen. Empfohlen mit **python-decouple** oder **django-environ**:
-
-**Variante 1 – python-decouple** (`pip install python-decouple`):
+**python-decouple** (`pip install python-decouple`):
 
 ```python
 from decouple import config
 
-SECRET_KEY = config("SECRET_KEY", default="dev-only-insecure-key")
-DEBUG = config("DEBUG", default=True, cast=bool)
+SECRET_KEY    = config("SECRET_KEY", default="dev-only-insecure-key")
+DEBUG         = config("DEBUG", default=False, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost").split(",")
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE":   "django.db.backends.postgresql",
         "NAME":     config("DB_NAME"),
         "USER":     config("DB_USER"),
         "PASSWORD": config("DB_PASS"),
@@ -182,13 +251,13 @@ DATABASES = {
 }
 ```
 
-**Variante 2 – os.environ** (ohne externe Abhängigkeit):
+**os.environ** (ohne externe Abhängigkeit):
 
 ```python
 import os
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-insecure-key")
-DEBUG = os.environ.get("DEBUG", "True") == "True"
+SECRET_KEY    = os.environ.get("SECRET_KEY", "dev-only-insecure-key")
+DEBUG         = os.environ.get("DEBUG", "False") == "True"
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost").split(",")
 
 DATABASES = {
@@ -203,9 +272,7 @@ DATABASES = {
 }
 ```
 
-> **Hinweis:** Die Variablen werden als Prozess-Umgebungsvariablen übergeben **und** als `.env`-Datei geschrieben. `os.environ` funktioniert direkt ohne weitere Pakete.
-
-### Nützliche Beispiele für "Weitere Vars"
+### Nützliche Weitere Vars
 
 | Schlüssel | Beispielwert | Zweck |
 |---|---|---|
@@ -215,48 +282,69 @@ DATABASES = {
 | `EMAIL_HOST_PASSWORD` | `app-passwort` | E-Mail-Passwort |
 | `EMAIL_USE_TLS` | `True` | TLS aktivieren |
 | `CORS_ALLOW_ALL_ORIGINS` | `True` | CORS für API-Backends |
-| `STRIPE_SECRET_KEY` | `sk_test_...` | Zahlungsanbieter |
-| `AWS_ACCESS_KEY_ID` | `AKIA...` | AWS-Zugang |
 
 ---
 
 ## App verwalten
 
-Jede App-Karte zeigt:
+### App-Karte
 
 | Element | Bedeutung |
 |---|---|
 | **●** grün | App läuft |
 | **○** rot | App gestoppt |
 | 🐙 GitHub | Quelle ist ein Git-Repository |
-| ⎇ Branch · Repo | Branch-Name und Repository-Kurzname |
+| `nginx :80 → Django :8000` | nginx-Modus aktiv |
 
 ### Aktionen
 
 | Button | Aktion |
 |---|---|
-| **▶ Start** | PostgreSQL starten (ggf. initdb + Migrationen), Django runserver starten, Browser öffnen |
-| **⏹ Stop** | Django und zugehörigen PostgreSQL-Server stoppen |
-| **🌐** | Browser auf `http://localhost:<Port>` öffnen |
-| **⬆ Update** | Neueste Version aus GitHub holen (`git pull`), Migrationen ausführen – App muss dafür gestoppt sein |
+| **▶ Start** | PostgreSQL starten, Django + nginx starten, Browser öffnen |
+| **⏹ Stop** | Django, waitress und nginx stoppen |
+| **🌐** | Browser öffnen (nginx-Port wenn aktiv, sonst App-Port) |
+| **⬆ Update** | `git pull` + Migrationen ausführen (App muss gestoppt sein) |
+| **👤** | Django-Superuser anlegen (GUI-Dialog) |
+| **🗄** | Datenbank zurücksetzen (Migrationen neu ausführen) |
 | **✏** | Konfiguration bearbeiten |
-| **🗑** | App aus der Liste entfernen (Quellcode und Datenbankdaten bleiben erhalten) |
+| **🗑** | App entfernen (Quellcode bleibt erhalten) |
 
 ---
 
 ## Ersteinrichtung einer neuen App
 
-Beim ersten Start einer App wird automatisch ausgeführt:
+Beim ersten Start läuft automatisch:
 
-1. `initdb` – PostgreSQL-Datenbank initialisieren
-2. Datenbankbenutzer und Datenbank anlegen
-3. `manage.py migrate --noinput` – Django-Migrationen anwenden
+1. PostgreSQL `initdb` – Datenbankcluster initialisieren
+2. DB-Benutzer und Datenbank anlegen
+3. `manage.py migrate --noinput` – Migrationen anwenden
 4. `manage.py collectstatic --noinput` – Statische Dateien sammeln
+5. Superuser anlegen (falls im Dialog konfiguriert)
 
-Danach öffnet sich der Browser automatisch.
+---
 
-> **Django Superuser anlegen:** Terminal öffnen und
-> `python manage.py createsuperuser` im App-Verzeichnis ausführen.
+## Als interner Test-Server nutzen
+
+Um die App im LAN erreichbar zu machen (z. B. für Kollegen oder Mobilgeräte):
+
+1. **Allowed Hosts** im App-Dialog ergänzen:
+   ```
+   localhost,127.0.0.1,192.168.1.50
+   ```
+   (IP des Windows-Rechners eintragen)
+
+2. **nginx aktivieren** und nginx-Port auf `80` lassen
+
+3. **Windows-Firewall**: Port 80 freigeben (als Admin):
+   ```powershell
+   New-NetFirewallRule -DisplayName "nginx Port 80" -Direction Inbound `
+     -Protocol TCP -LocalPort 80 -Action Allow
+   ```
+
+4. App starten → im LAN erreichbar unter `http://192.168.1.50/`
+
+> **Nicht geeignet für:** Öffentliches Internet, produktive Kundendaten, HTTPS-Pflicht.
+> Für echten Produktionsbetrieb → Linux-Server mit nginx + gunicorn + Let's Encrypt.
 
 ---
 
@@ -264,81 +352,32 @@ Danach öffnet sich der Browser automatisch.
 
 ### HTTPS
 
-Keine weitere Konfiguration nötig. Für private Repositories kann Git nach einem Token fragen – dieser wird vom System-Git-Credential-Manager gespeichert.
+Keine weitere Konfiguration nötig.
 
-### SSH mit eigenem Schlüssel
+### SSH
 
-#### Option A – Schlüssel direkt im Tool erstellen (empfohlen)
-
-Im App-Dialog neben dem SSH-Feld auf **🔑** (pinker Button) klicken:
+Im App-Dialog neben dem SSH-Feld auf **🔑** klicken:
 
 | Schritt | Was passiert |
 |---|---|
-| Schlüsselname und Speicherort wählen | Standard: `~\.ssh\id_ed25519_<appname>` |
-| **🔑 Schlüsselpaar erstellen** klicken | Generiert Ed25519-Keypair via `ssh-keygen` |
-| **📋 Kopieren** | Public Key in die Zwischenablage |
-| **⬇ .pub speichern** | Public-Key-Datei exportieren (z. B. auf den Desktop) |
-| **🌐 GitHub öffnen** | Öffnet `github.com/settings/ssh/new` direkt im Browser |
-| **Übernehmen & Schließen** | Privater Schlüsselpfad wird automatisch ins SSH-Feld eingetragen |
+| **🔑 Schlüsselpaar erstellen** | Generiert Ed25519-Keypair via `ssh-keygen` |
+| **📋 Kopieren** | Public Key in Zwischenablage |
+| **🌐 GitHub öffnen** | Öffnet `github.com/settings/ssh/new` |
 
-> **Public Key** → bei GitHub eintragen (öffentlich, kein Geheimnis)
-> **Private Key** → bleibt lokal auf deinem PC – niemals hochladen oder teilen!
-
-#### Option B – Bestehenden Schlüssel verwenden
-
-1. SSH-Schlüsselpaar generieren (falls noch nicht vorhanden):
-   ```powershell
-   ssh-keygen -t ed25519 -C "deploy@meinserver"
-   ```
-2. Öffentlichen Schlüssel (`id_ed25519.pub`) bei GitHub unter
-   **Settings → SSH and GPG keys → New SSH key** eintragen
-3. Im App-Dialog auf **…** klicken und den Pfad zum **privaten** Schlüssel wählen
-
-Das Tool übergibt den Schlüssel über `GIT_SSH_COMMAND` – die globale SSH-Konfiguration bleibt unberührt.
-
----
-
-## Datenbank-Konfiguration
-
-Jede App bekommt eine eigene PostgreSQL-Datenbank auf dem **Port 5433** (Standard, anpassbar). Die Daten liegen unter `data\app_<id>\`.
-
-Das Tool setzt beim Start alle nötigen Variablen – als Prozess-Umgebungsvariablen **und** als `.env`-Datei im Quellverzeichnis. Siehe Abschnitt [Umgebungsvariablen & .env-Datei](#umgebungsvariablen--env-datei) für Details und Konfigurationsbeispiele.
+Privaten Schlüsselpfad einfach ins SSH-Feld eintragen oder per **…** wählen.
 
 ---
 
 ## Voraussetzungen
 
-### Entwicklungsrechner (Build)
-- Python 3.11 oder neuer
-- `pip install customtkinter pyinstaller`
+### Build-Rechner
+- Python 3.11+, `pip install customtkinter pyinstaller`
 - Git für Windows (für GitHub-Integration)
 
-### Ziel-Windows-PC (Laufzeit)
+### Ziel-Windows-PC
 - Windows 10 / 11 (64-Bit)
 - Keine Installation erforderlich (alles portabel)
-- Git für Windows empfohlen für GitHub-Integration:
-  [git-scm.com/download/win](https://git-scm.com/download/win)
-
----
-
-## Abhängigkeiten
-
-| Paket | Zweck |
-|---|---|
-| `customtkinter` | Moderne grafische Oberfläche (Dark-Theme) |
-| `pyinstaller` | EXE-Erstellung |
-
-Python-Standardbibliotheken: `tkinter`, `sqlite3`, `subprocess`, `threading`, `pathlib`
-
----
-
-## Portabler Betrieb (USB / Netzlaufwerk)
-
-Den kompletten Ordner (`PortableDjangoManager\`) auf USB-Stick oder Netzlaufwerk kopieren. Auf dem Ziel-PC einfach `PortableDjangoManager.exe` starten.
-
-Die App-Datenbanken in `data\` und Git-Klone in `repos\` bleiben dabei erhalten.
-
-**Hinweis:** Auf dem Ziel-PC keine PostgreSQL-Installation nötig – das portable PostgreSQL in `postgres\` wird direkt genutzt.
+- Git für Windows empfohlen: [git-scm.com/download/win](https://git-scm.com/download/win)
 
 ---
 
@@ -346,74 +385,42 @@ Die App-Datenbanken in `data\` und Git-Klone in `repos\` bleiben dabei erhalten.
 
 ### PowerShell: „not digitally signed"
 
-**Fehlermeldung:**
-```
-File .\setup_environment.ps1 cannot be loaded. The file is not digitally signed.
-```
-
-**Ursache:** Windows setzt beim Herunterladen oder Kopieren von Dateien aus dem Internet (GitHub-Download, USB-Stick, E-Mail-Anhang) einen unsichtbaren „Zone 3"-Marker (NTFS Alternate Data Stream). `RemoteSigned` blockiert damit alle unsignierten Skripte.
-
-**Lösung 1 – Datei entsperren (einmalig, dauerhaft):**
 ```powershell
 Unblock-File -Path .\setup_environment.ps1
-.\setup_environment.ps1
-```
-
-**Lösung 2 – Einmalig mit Bypass starten:**
-```powershell
+# oder einmalig:
 powershell -ExecutionPolicy Bypass -File .\setup_environment.ps1
 ```
 
-**Alle `.ps1`-Dateien im Ordner auf einmal entsperren:**
-```powershell
-Get-ChildItem C:\portable -Filter *.ps1 | Unblock-File
-```
-
-> `Unblock-File` löscht nur den Internet-Marker – es werden keine Sicherheitseinstellungen dauerhaft verändert.
-
----
-
-### PowerShell: ExecutionPolicy setzen
-
-Falls noch keine Ausführungsrichtlinie gesetzt wurde:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-Mit `[A] Yes to All` bestätigen. Danach `Unblock-File` wie oben ausführen.
-
----
-
 ### „pyinstaller is not recognized"
-
-**Fehlermeldung:**
-```
-'pyinstaller' is not recognized as an internal or external command
-```
-
-**Ursache:** Python installiert ausführbare Skripte in `%AppData%\Python\PythonXYZ\Scripts`, dieses Verzeichnis ist aber nicht im PATH.
-
-**Lösung:** `build_exe.bat` ruft seit v1.1 automatisch `python -m PyInstaller` — PATH-Problem tritt nicht mehr auf.
-Falls du den Befehl manuell ausführst, nutze ebenfalls die Modulvariante:
 
 ```cmd
 python -m PyInstaller --onefile --windowed --name PortableDjangoManager main.py
 ```
 
----
+### nginx startet nicht
+
+- Prüfen ob `nginx\nginx-1.26.3\nginx.exe` vorhanden (ggf. Setup neu ausführen)
+- Prüfen ob Port 80 bereits belegt: `netstat -ano | findstr :80`
+- Anderen nginx-Port im App-Dialog konfigurieren (z. B. 8080)
+- nginx-Logs unter `nginx\logs\error_<app>.log` prüfen
+
+### Logo oder statische Datei fehlt (404)
+
+Die Datei ist nicht im Git-Repository der App. Lösung:
+
+```
+<App-Quellverzeichnis>\_portable_static\img\logo.png
+```
+
+→ Wird beim nächsten Start automatisch nach `staticfiles\img\logo.png` kopiert.
 
 ### ssh-keygen nicht gefunden
 
-Der SSH-Key-Manager im Tool ruft `ssh-keygen` auf. Dieses ist seit Windows 10 (Version 1809) als optionales Feature enthalten.
-
-**Prüfen:**
 ```powershell
+# Prüfen
 ssh-keygen --version
-```
 
-**Nachinstallieren (als Admin):**
-```powershell
+# Nachinstallieren (als Admin)
 Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 ```
 
@@ -421,10 +428,16 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 
 ## Sicherheitshinweis
 
-Dieses Tool ist für **lokale Entwicklung und interne Tests** ausgelegt:
+Das Tool läuft mit `DEBUG=False` und einem sicheren `SECRET_KEY`.
 
-- PostgreSQL hört nur auf `127.0.0.1` (kein Netzwerkzugriff)
-- Django läuft im `DEBUG=True`-Modus
-- Nicht für produktiven oder öffentlich erreichbaren Betrieb geeignet
+**Geeignet für:**
+- Lokale Entwicklung
+- Interne Demos und Tests im LAN
+- Präsentationen und Schulungen
 
-Für Produktionsdeployments → Linux-Server mit Nginx + Gunicorn verwenden.
+**Nicht geeignet für:**
+- Öffentliches Internet (kein HTTPS, kein DDoS-Schutz)
+- Produktiven Betrieb mit echten Kundendaten
+- Hochlast (waitress/nginx skalieren nicht auf viele gleichzeitige User)
+
+PostgreSQL hört nur auf `127.0.0.1` – kein direkter Netzwerkzugriff auf die Datenbank.

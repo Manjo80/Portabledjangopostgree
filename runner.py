@@ -473,17 +473,56 @@ class AppRunner:
                     on_complete(False)
                 return
 
+            nginx_port = self.app.get("nginx_port", self.app["port"]) if self._nginx else self.app["port"]
             self.log(
                 f"[{self.app['name']}] Bereit → "
-                f"http://localhost:{self.app['port']}"
+                f"http://localhost:{nginx_port}"
             )
             if on_complete:
                 on_complete(True)
 
-            # Warten bis Django beendet wird
-            self._dj_proc.wait()
-            with self._lock:
-                self._running = False
+            # ── Auto-Restart-Schleife ──────────────────────────────────────
+            # Wenn der Prozess unerwartet endet (nicht durch stop()),
+            # wird er automatisch bis zu 5 Mal neu gestartet.
+            MAX_RESTARTS   = 5
+            RESTART_DELAY  = 5   # Sekunden
+            restart_count  = 0
+
+            while True:
+                self._dj_proc.wait()          # blockiert bis Prozess endet
+                with self._lock:
+                    still_running = self._running
+                if not still_running:
+                    break                     # normaler stop() → kein Restart
+
+                if restart_count >= MAX_RESTARTS:
+                    self.log(
+                        f"[{self.app['name']}] Zu viele Neustarts ({MAX_RESTARTS}) – "
+                        f"gestoppt. Bitte Logs prüfen."
+                    )
+                    with self._lock:
+                        self._running = False
+                    break
+
+                restart_count += 1
+                self.log(
+                    f"[{self.app['name']}] ⚠ Prozess unerwartet beendet – "
+                    f"Neustart {restart_count}/{MAX_RESTARTS} in {RESTART_DELAY} s …"
+                )
+                time.sleep(RESTART_DELAY)
+
+                with self._lock:
+                    if not self._running:
+                        break               # stop() während sleep → kein Restart
+
+                if not self._start_django():
+                    self.log(f"[{self.app['name']}] Neustart fehlgeschlagen.")
+                    with self._lock:
+                        self._running = False
+                    break
+
+                self.log(f"[{self.app['name']}] ✅ Neustart {restart_count} erfolgreich.")
+
             self.log(f"[{self.app['name']}] Beendet.")
 
         except Exception as exc:
@@ -733,21 +772,65 @@ class AppRunner:
         if copied:
             self.log(f"  [{self.app['name']}] _portable_static: {copied} Datei(en) nach staticfiles/ kopiert.")
 
+    def _ensure_waitress(self) -> bool:
+        """
+        Prüft ob waitress installiert ist; installiert es bei Bedarf.
+        Waitress ist ein produktionsreifer, reiner Python WSGI-Server für Windows.
+        """
+        r = subprocess.run(
+            [str(self._py), "-c", "import waitress"],
+            capture_output=True,
+        )
+        if r.returncode == 0:
+            return True
+        self.log(f"  [{self.app['name']}] Installiere waitress (WSGI-Server) …")
+        r = subprocess.run(
+            [str(self._py), "-m", "pip", "install", "waitress",
+             "--quiet", "--no-warn-script-location"],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            self.log(f"  [{self.app['name']}] waitress-Installation fehlgeschlagen: "
+                     f"{(r.stderr or r.stdout).strip()[-300:]}")
+            return False
+        self.log(f"  [{self.app['name']}] waitress installiert.")
+        return True
+
     def _start_django(self) -> bool:
-        self.log(f"  [{self.app['name']}] Starte Django (Port {self.app['port']}) …")
+        port     = self.app["port"]
+        name     = self.app["name"]
+        use_nginx = self._nginx is not None
+
         env = self._build_env()
         self._write_dotenv(env)
         # Statische Dateien vor jedem Start sammeln (nicht nur beim Erstsetup),
         # damit manuell hinzugefügte Dateien (z.B. Logo) immer aktuell sind.
         self._run_collectstatic(env)
 
-        # Mit nginx: kein --insecure nötig (nginx liefert static/media/ direkt)
-        # Ohne nginx: --insecure damit Django static-Dateien mit DEBUG=False selbst ausliefert
-        use_nginx = self._nginx is not None
-        cmd = [str(self._py), "manage.py", "runserver"]
-        if not use_nginx:
-            cmd.append("--insecure")
-        cmd.append(f"0.0.0.0:{self.app['port']}")
+        if use_nginx and self._ensure_waitress():
+            # ── waitress WSGI-Server (multi-threaded, produktionsreif) ──────
+            # Kein runserver, kein --insecure nötig; nginx liefert static/media
+            # python -c "from waitress import serve; from django.core.wsgi import
+            #            get_wsgi_application; serve(...)"
+            # DJANGO_SETTINGS_MODULE ist bereits in env gesetzt.
+            # cwd=source_path → sys.path[0]='' → App-Module direkt importierbar.
+            startup = (
+                "from waitress import serve; "
+                "from django.core.wsgi import get_wsgi_application; "
+                f"serve(get_wsgi_application(), host='0.0.0.0', port={port}, threads=8)"
+            )
+            cmd = [str(self._py), "-c", startup]
+            self.log(f"  [{name}] Starte waitress WSGI-Server (Port {port}, 8 Threads) …")
+        else:
+            # ── Django-Runserver (Fallback / Dev-Modus ohne nginx) ───────────
+            cmd = [str(self._py), "manage.py", "runserver"]
+            if not use_nginx:
+                cmd.append("--insecure")   # static-Dateien mit DEBUG=False
+            cmd.append(f"0.0.0.0:{port}")
+            if use_nginx:
+                self.log(f"  [{name}] Starte Django-Runserver (waitress nicht verfügbar) …")
+            else:
+                self.log(f"  [{name}] Starte Django-Runserver mit --insecure …")
 
         with self._lock:
             self._dj_proc = subprocess.Popen(
@@ -764,7 +847,7 @@ class AppRunner:
             if self._dj_proc.poll() is not None:
                 return False
 
-        # nginx nach Django starten (damit der Proxy-Backend schon bereit ist)
+        # nginx nach Django/waitress starten (Proxy-Backend ist jetzt bereit)
         if self._nginx:
             self._nginx.start()
 

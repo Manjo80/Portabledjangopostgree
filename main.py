@@ -25,6 +25,7 @@ import customtkinter as ctk
 
 from db import Database
 from git_manager import GitManager
+from nginx_manager import NginxManager
 from runner import AppRunner, SharedPostgresServer, BASE_DIR
 
 # ─── Erscheinungsbild ─────────────────────────────────────────────────────────
@@ -1074,6 +1075,9 @@ class PortableDjangoManager(ctk.CTk):
         self._update_pg_status()          # PostgreSQL-Status-Anzeige starten
         # PostgreSQL beim Start im Hintergrund starten
         threading.Thread(target=self._start_pg_server, daemon=True).start()
+        # nginx vorab herunterladen falls benötigt (nach kurzer Verzögerung
+        # damit das Fenster zuerst vollständig aufgebaut ist)
+        self.after(2000, self._check_nginx_on_startup)
 
     def _start_pg_server(self):
         ok = self.pg_server.start()
@@ -1421,6 +1425,8 @@ class PortableDjangoManager(ctk.CTk):
         self.db.add_app(**result)
         self._log(f"App '{result['name']}' hinzugefügt.")
         self._refresh()
+        # nginx bei Bedarf sofort im Hintergrund herunterladen
+        self._ensure_nginx_ready(result)
 
     def _edit_app(self, app: dict):
         dlg = AppDialog(self, app=app)
@@ -1429,6 +1435,8 @@ class PortableDjangoManager(ctk.CTk):
             self.db.update_app(app["id"], **dlg.result)
             self._log(f"App '{dlg.result['name']}' gespeichert.")
             self._refresh()
+            # nginx bei Bedarf sofort im Hintergrund herunterladen
+            self._ensure_nginx_ready(dlg.result)
 
     def _delete_app(self, app: dict):
         if self._is_running(app["id"]):
@@ -1707,6 +1715,69 @@ class PortableDjangoManager(ctk.CTk):
                 ))
 
         threading.Thread(target=_check, daemon=True).start()
+
+    # ─── nginx Download-Management ────────────────────────────────────────
+
+    def _ensure_nginx_ready(self, app: dict):
+        """
+        Startet nginx-Download im Hintergrund wenn nginx_enabled=1
+        und nginx noch nicht vorhanden ist.
+        Wird beim Speichern einer App-Konfiguration aufgerufen,
+        damit nginx beim ersten App-Start bereits bereit ist.
+        """
+        if not app.get("nginx_enabled"):
+            return
+        mgr = NginxManager(BASE_DIR, app, log_callback=self._log_thread_safe)
+        if mgr.is_available():
+            self._log_thread_safe(
+                f"  [nginx] ✅ nginx bereits vorhanden ({mgr.nginx_exe})"
+            )
+            return
+        # Hintergrund-Download starten
+        def _download():
+            self._log_thread_safe(
+                "  [nginx] nginx nicht gefunden – starte automatischen Download …"
+            )
+            ok = mgr.download_nginx()
+            if ok:
+                self._log_thread_safe(
+                    "  [nginx] ✅ Download abgeschlossen. nginx ist beim nächsten Start bereit."
+                )
+            else:
+                self._log_thread_safe(
+                    "  [nginx] ❌ Download fehlgeschlagen.\n"
+                    f"  [nginx]    Manuell: nginx.exe in {mgr.nginx_base}\\nginx-1.26.3\\ ablegen."
+                )
+        threading.Thread(target=_download, daemon=True).start()
+
+    def _check_nginx_on_startup(self):
+        """
+        Beim Tool-Start: für alle Apps mit nginx_enabled=1 nginx
+        im Hintergrund herunterladen falls noch nicht vorhanden.
+        """
+        apps = self.db.get_apps()
+        nginx_apps = [a for a in apps if a.get("nginx_enabled")]
+        if not nginx_apps:
+            return
+        mgr = NginxManager(BASE_DIR, nginx_apps[0],
+                           log_callback=self._log_thread_safe)
+        if mgr.is_available():
+            return  # schon da, nichts tun
+
+        def _download():
+            self._log_thread_safe(
+                f"  [nginx] {len(nginx_apps)} App(s) nutzen nginx – lade nginx herunter …"
+            )
+            ok = mgr.download_nginx()
+            if ok:
+                self._log_thread_safe(
+                    "  [nginx] ✅ nginx bereit."
+                )
+            else:
+                self._log_thread_safe(
+                    "  [nginx] ❌ Download fehlgeschlagen – bitte nginx manuell installieren."
+                )
+        threading.Thread(target=_download, daemon=True).start()
 
     # ─── Hilfsmethoden ────────────────────────────────────────────────────
 

@@ -67,6 +67,12 @@ class SharedPostgresServer:
         if pg_lib.exists():
             paths.append(str(pg_lib))
         env["PATH"] = os.pathsep.join(paths) + os.pathsep + env.get("PATH", "")
+        # UTC erzwingen: portables PostgreSQL hat kein share/timezone-Verzeichnis.
+        # initdb/postgres würden sonst die Windows-Systemzeitzone (z.B. Europe/Berlin)
+        # übernehmen und mit FATAL starten, weil die Zeitzonendateien fehlen.
+        # UTC ist in PostgreSQL fest eingebaut – kein Dateisystem-Lookup nötig.
+        env["TZ"] = "UTC"
+        env["PGTZ"] = "UTC"
         return env
 
     # ── Status ────────────────────────────────────────────────────────────
@@ -115,32 +121,9 @@ class SharedPostgresServer:
             self._log(f"  [PostgreSQL] initdb FEHLER: {r.stderr.strip()[-500:]}")
             return False
 
-        # postgresql.conf patchen:
-        # initdb schreibt die Windows-Systemzeitzone (z.B. Europe/Berlin) hinein.
-        # Portable PostgreSQL hat kein share/timezone-Verzeichnis → FATAL beim Start.
-        # Lösung: alle timezone/log_timezone-Zeilen durch UTC ersetzen,
-        #         dann Port und listen_addresses anhängen.
-        # UTC ist in PostgreSQL fest eingebaut, braucht keine externen Dateien.
-        import re
         conf_path = self.data_dir / "postgresql.conf"
-        conf_text = conf_path.read_text(encoding="utf-8")
-        conf_text = re.sub(
-            r"^[ \t]*#?[ \t]*log_timezone[ \t]*=.*$",
-            "log_timezone = 'UTC'",
-            conf_text, flags=re.MULTILINE,
-        )
-        conf_text = re.sub(
-            r"^[ \t]*#?[ \t]*TimeZone[ \t]*=.*$",
-            "TimeZone = 'UTC'",
-            conf_text, flags=re.MULTILINE | re.IGNORECASE,
-        )
-        conf_path.write_text(conf_text, encoding="utf-8")
-
         with open(conf_path, "a", encoding="utf-8") as f:
-            f.write(
-                f"\nlisten_addresses = '127.0.0.1'\n"
-                f"port = {self.port}\n"
-            )
+            f.write(f"\nlisten_addresses = '127.0.0.1'\nport = {self.port}\n")
 
         self._log(f"  [PostgreSQL] Datenbankcluster initialisiert (Port {self.port}).")
         return True

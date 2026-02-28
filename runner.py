@@ -70,18 +70,15 @@ class SharedPostgresServer:
             paths.append(str(pg_lib))
         env["PATH"] = os.pathsep.join(paths) + os.pathsep + env.get("PATH", "")
 
-        # PGSHAREDIR: Timezone-Daten und andere shared files explizit setzen.
-        # Der portable PostgreSQL-Binary hat einen kompilierten Pfad (/share/…)
-        # der auf Windows nicht existiert. Ohne diese Variable sucht PostgreSQL
-        # die Zeitzonendaten unter dem Unix-Pfad und startet mit FATAL-Fehler:
-        #   "could not open directory /share/timezone"
+        # PGSHAREDIR: Sagt PostgreSQL wo seine shared files liegen (Timezone-Daten,
+        # Templates, …).  Der portable Binary hat den Unix-Pfad /usr/share/postgresql
+        # einkompiliert, der auf Windows nicht existiert.  Ohne diese Variable:
+        #   FATAL: "could not open directory /share/timezone"
         pg_share = self.postgres_dir / "share"
         if pg_share.is_dir():
             env["PGSHAREDIR"] = str(pg_share)
-
-        # TZ/PGTZ: Systemzeitzone auf UTC setzen damit initdb und laufender
-        # Server dieselbe Zeitzone verwenden und keine Windows-Systemzeitzone
-        # (z.B. Europe/Berlin) als Default übernehmen.
+        # TZ/PGTZ auf UTC: initdb übernimmt sonst die Windows-Systemzeitzone
+        # (z.B. "W. Europe Standard Time"), die der Binary nicht auflösen kann.
         env["TZ"]   = "UTC"
         env["PGTZ"] = "UTC"
         return env
@@ -111,8 +108,15 @@ class SharedPostgresServer:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        self._log(f"  [PostgreSQL] Initialisiere gemeinsamen Datenbankserver …")
         pg_share = self.postgres_dir / "share"
+        tz_dir   = pg_share / "timezone"
+        if tz_dir.is_dir():
+            self._log(f"  [PostgreSQL] Timezone-Daten gefunden: {tz_dir}")
+        else:
+            self._log(f"  [PostgreSQL] WARNUNG: Kein timezone-Verzeichnis unter {tz_dir} – "
+                      f"bitte sicherstellen dass postgres\\share\\timezone\\ vorhanden ist.")
+
+        self._log(f"  [PostgreSQL] Initialisiere gemeinsamen Datenbankserver …")
         cmd = [
             str(self._initdb),
             "-D", str(self.data_dir),
@@ -120,8 +124,10 @@ class SharedPostgresServer:
             "-E", "UTF8",
             "--no-locale",
             "--auth=trust",
-            "--tz=UTC",     # explizit UTC in postgresql.conf schreiben
         ]
+        # -L: Sagt initdb wo seine eigenen Template-/Timezone-Dateien liegen.
+        # Ohne diesen Parameter sucht initdb im kompilierten Pfad (oft /usr/share/postgresql),
+        # der auf Windows nicht existiert → initdb schlägt fehl.
         if pg_share.is_dir():
             cmd += ["-L", str(pg_share)]
 
@@ -130,24 +136,25 @@ class SharedPostgresServer:
             env=self._pg_env(), creationflags=_NO_WIN,
         )
         if r.returncode != 0:
-            self._log(f"  [PostgreSQL] initdb FEHLER: {r.stderr.strip()[-500:]}")
+            self._log(f"  [PostgreSQL] initdb FEHLER:\n{r.stderr.strip()}")
             return False
 
         conf_path = self.data_dir / "postgresql.conf"
 
-        # postgresql.conf patchen:
-        # 1. TimeZone / log_timezone auf UTC setzen (überschreibt ggf. Systemwerte)
-        # 2. listen_addresses und Port anhängen
+        # postgresql.conf patchen – MUSS direkt nach initdb passieren, BEVOR pg_ctl
+        # den Server startet.  initdb schreibt manchmal die Windows-Systemzeitzone
+        # (z.B. "W. Europe Standard Time") in die Conf, die der portable Binary
+        # ohne installiertes Windows-Timezone-Paket nicht auflösen kann.
+        # UTC ist in PostgreSQL immer eingebaut und braucht keine externen Daten.
+        import re as _re
         try:
             conf = conf_path.read_text(encoding="utf-8")
-            # Bestehende Timezone-Einträge ersetzen (initdb setzt sie manchmal auf
-            # die Windows-Systemzeitzone, die auf portablen Installs nicht auflösbar ist)
-            import re as _re
-            conf = _re.sub(r"^#?\s*TimeZone\s*=.*$",     "TimeZone = 'UTC'",     conf, flags=_re.MULTILINE)
-            conf = _re.sub(r"^#?\s*log_timezone\s*=.*$",  "log_timezone = 'UTC'", conf, flags=_re.MULTILINE)
+            conf = _re.sub(r"^#?\s*TimeZone\s*=.*$",    "timezone = 'UTC'",     conf, flags=_re.MULTILINE)
+            conf = _re.sub(r"^#?\s*log_timezone\s*=.*$", "log_timezone = 'UTC'", conf, flags=_re.MULTILINE)
             conf_path.write_text(conf, encoding="utf-8")
-        except Exception:
-            pass  # Fallback: anhängen
+            self._log("  [PostgreSQL] postgresql.conf: timezone auf UTC gesetzt.")
+        except Exception as exc:
+            self._log(f"  [PostgreSQL] Warnung: Konnte postgresql.conf nicht patchen: {exc}")
 
         with open(conf_path, "a", encoding="utf-8") as f:
             f.write(f"\nlisten_addresses = '127.0.0.1'\nport = {self.port}\n")

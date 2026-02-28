@@ -69,11 +69,20 @@ class SharedPostgresServer:
         if pg_lib.exists():
             paths.append(str(pg_lib))
         env["PATH"] = os.pathsep.join(paths) + os.pathsep + env.get("PATH", "")
-        # UTC erzwingen: portables PostgreSQL hat kein share/timezone-Verzeichnis.
-        # initdb/postgres würden sonst die Windows-Systemzeitzone (z.B. Europe/Berlin)
-        # übernehmen und mit FATAL starten, weil die Zeitzonendateien fehlen.
-        # UTC ist in PostgreSQL fest eingebaut – kein Dateisystem-Lookup nötig.
-        env["TZ"] = "UTC"
+
+        # PGSHAREDIR: Timezone-Daten und andere shared files explizit setzen.
+        # Der portable PostgreSQL-Binary hat einen kompilierten Pfad (/share/…)
+        # der auf Windows nicht existiert. Ohne diese Variable sucht PostgreSQL
+        # die Zeitzonendaten unter dem Unix-Pfad und startet mit FATAL-Fehler:
+        #   "could not open directory /share/timezone"
+        pg_share = self.postgres_dir / "share"
+        if pg_share.is_dir():
+            env["PGSHAREDIR"] = str(pg_share)
+
+        # TZ/PGTZ: Systemzeitzone auf UTC setzen damit initdb und laufender
+        # Server dieselbe Zeitzone verwenden und keine Windows-Systemzeitzone
+        # (z.B. Europe/Berlin) als Default übernehmen.
+        env["TZ"]   = "UTC"
         env["PGTZ"] = "UTC"
         return env
 
@@ -111,6 +120,7 @@ class SharedPostgresServer:
             "-E", "UTF8",
             "--no-locale",
             "--auth=trust",
+            "--tz=UTC",     # explizit UTC in postgresql.conf schreiben
         ]
         if pg_share.is_dir():
             cmd += ["-L", str(pg_share)]
@@ -124,6 +134,21 @@ class SharedPostgresServer:
             return False
 
         conf_path = self.data_dir / "postgresql.conf"
+
+        # postgresql.conf patchen:
+        # 1. TimeZone / log_timezone auf UTC setzen (überschreibt ggf. Systemwerte)
+        # 2. listen_addresses und Port anhängen
+        try:
+            conf = conf_path.read_text(encoding="utf-8")
+            # Bestehende Timezone-Einträge ersetzen (initdb setzt sie manchmal auf
+            # die Windows-Systemzeitzone, die auf portablen Installs nicht auflösbar ist)
+            import re as _re
+            conf = _re.sub(r"^#?\s*TimeZone\s*=.*$",     "TimeZone = 'UTC'",     conf, flags=_re.MULTILINE)
+            conf = _re.sub(r"^#?\s*log_timezone\s*=.*$",  "log_timezone = 'UTC'", conf, flags=_re.MULTILINE)
+            conf_path.write_text(conf, encoding="utf-8")
+        except Exception:
+            pass  # Fallback: anhängen
+
         with open(conf_path, "a", encoding="utf-8") as f:
             f.write(f"\nlisten_addresses = '127.0.0.1'\nport = {self.port}\n")
 

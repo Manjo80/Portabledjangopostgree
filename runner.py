@@ -589,15 +589,7 @@ class AppRunner:
 
         self.log(f"  [{self.app['name']}] Django-Migrationen …")
         env = self._build_env()
-        r = subprocess.run(
-            [str(self._py), "manage.py", "migrate", "--noinput"],
-            cwd=self.app["source_path"],
-            env=env,
-            capture_output=True, text=True,
-        )
-        if r.returncode != 0:
-            out = (r.stderr or r.stdout).strip()[-1000:]
-            self.log(f"  Migrations-Fehler (returncode={r.returncode}): {out}")
+        if not self._migrate(env):
             return False
 
         # Superuser automatisch anlegen
@@ -630,6 +622,50 @@ class AppRunner:
         self.log(f"  [{self.app['name']}] Ersteinrichtung abgeschlossen.")
         return True
 
+    # ─── Migrations-Helfer ────────────────────────────────────────────────
+
+    def _migrate(self, env: dict) -> bool:
+        """
+        Führt 'migrate --noinput' aus.
+        Erkennt automatisch Migration-Konflikte (mehrere Leaf-Nodes) und löst
+        sie mit 'makemigrations --merge --no-input' – danach wird erneut migriert.
+        Gibt True zurück wenn alles erfolgreich war.
+        """
+        name = self.app["name"]
+        src  = self.app["source_path"]
+
+        r = subprocess.run(
+            [str(self._py), "manage.py", "migrate", "--noinput"],
+            cwd=src, env=env, capture_output=True, text=True,
+        )
+        out = (r.stderr + r.stdout).strip()
+
+        if r.returncode != 0 and "conflicting migrations" in out.lower():
+            self.log(f"  [{name}] Migration-Konflikt erkannt – führe makemigrations --merge aus …")
+            rm = subprocess.run(
+                [str(self._py), "manage.py", "makemigrations", "--merge", "--no-input"],
+                cwd=src, env=env, capture_output=True, text=True,
+            )
+            merge_out = (rm.stderr + rm.stdout).strip()
+            for line in merge_out.splitlines():
+                self.log(f"  [{name}] merge: {line}")
+            if rm.returncode != 0:
+                self.log(f"  [{name}] makemigrations --merge fehlgeschlagen.")
+                return False
+            # Nochmal migrieren nach dem Merge
+            r = subprocess.run(
+                [str(self._py), "manage.py", "migrate", "--noinput"],
+                cwd=src, env=env, capture_output=True, text=True,
+            )
+            out = (r.stderr + r.stdout).strip()
+
+        if r.returncode != 0:
+            self.log(f"  Migrations-Fehler (returncode={r.returncode}): {out[-1000:]}")
+            return False
+
+        self.log(f"  [{name}] Migrationen OK.")
+        return True
+
     # ─── Migrationen (für Update-Workflow) ────────────────────────────────
 
     def _run_migrations(self) -> bool:
@@ -644,21 +680,9 @@ class AppRunner:
             return False
 
         env = self._build_env()
-        r = subprocess.run(
-            [str(self._py), "manage.py", "migrate", "--noinput"],
-            cwd=self.app["source_path"],
-            env=env,
-            capture_output=True, text=True,
-        )
-        if r.returncode != 0:
-            out = (r.stderr or r.stdout).strip()[-1000:]
-            self.log(f"  Migrations-Fehler (returncode={r.returncode}): {out}")
-        else:
-            self.log(f"  [{self.app['name']}] Migrationen OK.")
-
+        ok  = self._migrate(env)
         self._run_collectstatic(env)
-
-        return r.returncode == 0
+        return ok
 
     # ─── Requirements ─────────────────────────────────────────────────────
 
